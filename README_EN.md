@@ -17,6 +17,29 @@
 
 ---
 
+## 🎯 What is Dayflow?
+
+**Dayflow** is an AI-powered intelligent time tracking tool. It silently records your screen in the background, uses vision AI to automatically identify what you're doing, and generates an intuitive timeline to help you understand where your time goes every day.
+
+### 💡 Why Do You Need It?
+
+- **Don't know where your time went?** → Dayflow auto-records, no manual tracking needed
+- **Want to boost productivity?** → AI analyzes your work patterns, identifies distractions
+- **Need a work log?** → Auto-generates daily activity reports
+- **Remote work attendance?** → Objectively records work hours and content
+
+### 🏆 Key Advantages
+
+| Advantage | Description |
+|-----------|-------------|
+| **Zero Effort** | Set and forget, AI fully automates activity recognition |
+| **Ultra Low Power** | 1 FPS recording + smart compression, < 1% CPU usage |
+| **Privacy First** | Local data storage, videos auto-deleted after analysis |
+| **Smart Categories** | AI auto-identifies: Work/Study/Entertainment/Social/Rest |
+| **Productivity Score** | Efficiency rating for each activity, quantify your focus |
+
+---
+
 ## ✨ Features
 
 | Feature | Description |
@@ -26,6 +49,61 @@
 | 📊 **Timeline Visualization** | Intuitive daily time allocation view at a glance |
 | 💡 **Productivity Insights** | AI-driven efficiency assessment and improvement suggestions |
 | 🔒 **Privacy First** | Local data storage, auto-cleanup after analysis |
+
+### 🆕 Latest Features
+
+| Feature | Description |
+|---------|-------------|
+| 📅 **Date Navigation** | View history with previous/next day and quick "Today" buttons |
+| 📥 **CSV Export** | One-click export activity data to CSV for analysis and archiving |
+| ⏸️ **Pause Recording** | Pause when handling private content, resume when done |
+| 📊 **Time Distribution** | Visual bar chart showing time allocation by category |
+| 🎨 **Theme Switching** | IDE-style dark/light themes with auto-saved preferences |
+| 🔽 **System Tray** | Minimize to tray on close, keeps running in background |
+
+---
+
+## 🖥️ UI Preview
+
+### Main Interface Layout
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Dayflow                                    ─  □  ✕    │
+├────────┬────────────────────────────────────────────────┤
+│        │                                                │
+│   📊   │    ┌─────────────────────────────────────┐    │
+│Timeline│    │  09:00 - 10:30  ⚡ 85%              │    │
+│        │    │  📁 Work · VS Code Development       │    │
+│   ⚙️   │    │  Python project, writing core modules│    │
+│Settings│    └─────────────────────────────────────┘    │
+│        │    ┌─────────────────────────────────────┐    │
+│   ▶️   │    │  10:30 - 11:00  ⚡ 45%              │    │
+│ Record │    │  🎮 Entertainment · Chrome Browser   │    │
+│        │    │  Browsing social media, watching videos  │
+│        │    └─────────────────────────────────────┘    │
+│        │                                                │
+└────────┴────────────────────────────────────────────────┘
+```
+
+### Interface Guide
+
+| Area | Function |
+|------|----------|
+| **Left Sidebar** | Navigation: Timeline, Settings, Recording Control |
+| **Timeline Page** | Displays all activity cards for today, sorted by time |
+| **Activity Cards** | Shows time range, category, app, summary, productivity score |
+| **Settings Page** | Configure API Key, test connection, recording parameters |
+| **System Tray** | Runs in tray when minimized, right-click menu for control |
+
+### Activity Card Details
+
+Each card contains:
+- ⏰ **Time Range** - Start and end time of the activity
+- 📁 **Category** - Work/Study/Coding/Meeting/Entertainment/Social/Rest
+- 💻 **Application** - Main software used
+- 📝 **Summary** - AI-generated activity description
+- ⚡ **Productivity Score** - 0-100% efficiency rating
 
 ---
 
@@ -145,6 +223,14 @@ Dayflow/
 | HTTP Client | httpx (HTTP/2) |
 | Database | SQLite |
 | AI Analysis | OpenAI-compatible API |
+
+---
+
+## 💡 Inspiration
+
+This project is inspired by [Dayflow (macOS)](https://github.com/JerryZLiu/Dayflow). Since the original project only supports macOS, I developed this Windows version based on the same concept, allowing more users to experience AI-powered intelligent time tracking.
+
+Thanks to the original author for the creativity and open-source spirit! 🙏
 
 ---
 

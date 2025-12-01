@@ -64,6 +64,18 @@ def main():
     # 设置应用样式
     app.setStyle("Fusion")
     
+    # 加载并应用保存的主题
+    from database.storage import StorageManager
+    from ui.themes import get_theme_manager, DARK_THEME, LIGHT_THEME
+    
+    storage = StorageManager()
+    saved_theme = storage.get_setting("theme", "dark")
+    theme_manager = get_theme_manager()
+    if saved_theme == "light":
+        theme_manager.set_theme(LIGHT_THEME)
+    else:
+        theme_manager.set_theme(DARK_THEME)
+    
     # 创建并显示主窗口
     window = MainWindow()
     window.show()

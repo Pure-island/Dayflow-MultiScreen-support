@@ -6,12 +6,14 @@ from typing import List, Optional
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QFrame, QSizePolicy, QProgressBar, QGraphicsDropShadowEffect
+    QFrame, QSizePolicy, QProgressBar, QGraphicsDropShadowEffect,
+    QPushButton, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal, QSize, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QColor, QFont, QPalette, QLinearGradient, QPainter, QBrush
 
 from core.types import ActivityCard
+from ui.themes import get_theme_manager, get_theme
 
 
 # 类别颜色映射
@@ -40,6 +42,170 @@ def get_category_color(category: str) -> str:
     return CATEGORY_COLORS.get(category, "#78716C")
 
 
+class StatsSummaryWidget(QFrame):
+    """统计汇总组件 - 显示时间分布"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._data = {}  # category -> minutes
+        self._total_minutes = 0
+        self._setup_ui()
+        self.apply_theme()
+        get_theme_manager().theme_changed.connect(self.apply_theme)
+    
+    def _setup_ui(self):
+        self.setObjectName("statsSummary")
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
+        
+        # 标题
+        title_layout = QHBoxLayout()
+        self.title_label = QLabel("📊 时间分布")
+        title_layout.addWidget(self.title_label)
+        
+        self.total_label = QLabel("0h 0m")
+        title_layout.addWidget(self.total_label)
+        title_layout.addStretch()
+        layout.addLayout(title_layout)
+        
+        # 图表区域
+        self.chart_container = QVBoxLayout()
+        self.chart_container.setSpacing(8)
+        layout.addLayout(self.chart_container)
+    
+    def apply_theme(self):
+        """应用主题"""
+        t = get_theme()
+        self.setStyleSheet(f"""
+            QFrame#statsSummary {{
+                background-color: {t.bg_secondary};
+                border: 1px solid {t.border};
+                border-radius: 12px;
+            }}
+        """)
+        self.title_label.setStyleSheet(f"""
+            font-size: 14px;
+            font-weight: 600;
+            color: {t.text_primary};
+        """)
+        self.total_label.setStyleSheet(f"""
+            font-size: 13px;
+            color: {t.text_muted};
+        """)
+        
+        # 重新生成图表以应用新主题
+        if self._data:
+            self._regenerate_bars()
+    
+    def _regenerate_bars(self):
+        """重新生成所有柱状图"""
+        # 清除现有柱状图
+        while self.chart_container.count():
+            item = self.chart_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if not self._data:
+            return
+        
+        # 按时间排序并重新创建
+        sorted_data = sorted(self._data.items(), key=lambda x: x[1], reverse=True)
+        for category, minutes in sorted_data:
+            self._add_bar(category, minutes)
+    
+    def set_data(self, cards: list):
+        """根据卡片数据设置统计"""
+        # 清除旧数据
+        while self.chart_container.count():
+            item = self.chart_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # 统计各类别时间
+        self._data = {}
+        for card in cards:
+            category = card.category or "其他"
+            minutes = card.duration_minutes
+            self._data[category] = self._data.get(category, 0) + minutes
+        
+        self._total_minutes = sum(self._data.values())
+        
+        # 更新总时间
+        hours = int(self._total_minutes // 60)
+        mins = int(self._total_minutes % 60)
+        self.total_label.setText(f"共 {hours}h {mins}m")
+        
+        if not self._data:
+            t = get_theme()
+            empty = QLabel("暂无数据")
+            empty.setStyleSheet(f"color: {t.text_muted}; font-size: 13px;")
+            self.chart_container.addWidget(empty)
+            return
+        
+        # 按时间排序
+        sorted_data = sorted(self._data.items(), key=lambda x: x[1], reverse=True)
+        
+        # 创建柱状图
+        for category, minutes in sorted_data:
+            self._add_bar(category, minutes)
+    
+    def _add_bar(self, category: str, minutes: float):
+        """添加一个统计条"""
+        t = get_theme()
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+        
+        # 类别名 - 使用主题文字颜色
+        cat_label = QLabel(category)
+        cat_label.setFixedWidth(60)
+        cat_label.setStyleSheet(f"""
+            font-size: 12px;
+            color: {t.text_primary};
+        """)
+        row_layout.addWidget(cat_label)
+        
+        # 进度条
+        percentage = (minutes / self._total_minutes * 100) if self._total_minutes > 0 else 0
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(int(percentage))
+        bar.setTextVisible(False)
+        bar.setFixedHeight(12)
+        
+        color = get_category_color(category)
+        bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {t.bg_tertiary};
+                border: none;
+                border-radius: 6px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {color};
+                border-radius: 6px;
+            }}
+        """)
+        row_layout.addWidget(bar, 1)
+        
+        # 时间
+        hours = int(minutes // 60)
+        mins = int(minutes % 60)
+        time_str = f"{hours}h {mins}m" if hours else f"{mins}m"
+        time_label = QLabel(time_str)
+        time_label.setFixedWidth(50)
+        time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        time_label.setStyleSheet(f"""
+            font-size: 12px;
+            color: {t.text_muted};
+        """)
+        row_layout.addWidget(time_label)
+        
+        self.chart_container.addWidget(row)
+
+
 class ActivityCardWidget(QFrame):
     """单个活动卡片组件"""
     
@@ -51,6 +217,7 @@ class ActivityCardWidget(QFrame):
         self._setup_ui()
     
     def _setup_ui(self):
+        t = get_theme()
         self.setObjectName("activityCard")
         self.setCursor(Qt.PointingHandCursor)
         self.setFrameShape(QFrame.StyledPanel)
@@ -84,11 +251,11 @@ class ActivityCardWidget(QFrame):
         time_str = self._format_time_range()
         time_label = QLabel(time_str)
         time_label.setObjectName("timeLabel")
-        time_label.setStyleSheet("""
-            QLabel#timeLabel {
-                color: #9CA3AF;
+        time_label.setStyleSheet(f"""
+            QLabel#timeLabel {{
+                color: {t.text_muted};
                 font-size: 12px;
-            }
+            }}
         """)
         top_layout.addWidget(time_label)
         top_layout.addStretch()
@@ -96,8 +263,8 @@ class ActivityCardWidget(QFrame):
         # 生产力评分
         if self.card.productivity_score > 0:
             score_label = QLabel(f"⚡ {int(self.card.productivity_score)}%")
-            score_label.setStyleSheet("""
-                color: #10B981;
+            score_label.setStyleSheet(f"""
+                color: {t.success};
                 font-size: 12px;
                 font-weight: 600;
             """)
@@ -109,12 +276,12 @@ class ActivityCardWidget(QFrame):
         title_label = QLabel(self.card.title or "未命名活动")
         title_label.setObjectName("titleLabel")
         title_label.setWordWrap(True)
-        title_label.setStyleSheet("""
-            QLabel#titleLabel {
-                color: #F9FAFB;
+        title_label.setStyleSheet(f"""
+            QLabel#titleLabel {{
+                color: {t.text_primary};
                 font-size: 16px;
                 font-weight: 600;
-            }
+            }}
         """)
         layout.addWidget(title_label)
         
@@ -123,12 +290,12 @@ class ActivityCardWidget(QFrame):
             summary_label = QLabel(self.card.summary)
             summary_label.setObjectName("summaryLabel")
             summary_label.setWordWrap(True)
-            summary_label.setStyleSheet("""
-                QLabel#summaryLabel {
-                    color: #D1D5DB;
+            summary_label.setStyleSheet(f"""
+                QLabel#summaryLabel {{
+                    color: {t.text_secondary};
                     font-size: 13px;
                     line-height: 1.5;
-                }
+                }}
             """)
             layout.addWidget(summary_label)
         
@@ -139,9 +306,9 @@ class ActivityCardWidget(QFrame):
             
             for i, app in enumerate(self.card.app_sites[:4]):  # 最多显示4个
                 app_label = QLabel(app.name)
-                app_label.setStyleSheet("""
-                    background-color: #374151;
-                    color: #E5E7EB;
+                app_label.setStyleSheet(f"""
+                    background-color: {t.bg_tertiary};
+                    color: {t.text_secondary};
                     padding: 3px 8px;
                     border-radius: 3px;
                     font-size: 11px;
@@ -150,8 +317,8 @@ class ActivityCardWidget(QFrame):
             
             if len(self.card.app_sites) > 4:
                 more_label = QLabel(f"+{len(self.card.app_sites) - 4}")
-                more_label.setStyleSheet("""
-                    color: #9CA3AF;
+                more_label.setStyleSheet(f"""
+                    color: {t.text_muted};
                     font-size: 11px;
                 """)
                 apps_layout.addWidget(more_label)
@@ -160,22 +327,22 @@ class ActivityCardWidget(QFrame):
             layout.addLayout(apps_layout)
         
         # 卡片样式
-        self.setStyleSheet("""
-            QFrame#activityCard {
-                background-color: #1F2937;
-                border: 1px solid #374151;
+        self.setStyleSheet(f"""
+            QFrame#activityCard {{
+                background-color: {t.bg_secondary};
+                border: 1px solid {t.border};
                 border-radius: 12px;
-            }
-            QFrame#activityCard:hover {
-                background-color: #283548;
-                border-color: #4B5563;
-            }
+            }}
+            QFrame#activityCard:hover {{
+                background-color: {t.bg_hover};
+                border-color: {t.border_hover};
+            }}
         """)
         
         # 添加阴影效果
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 60))
+        shadow.setColor(QColor(0, 0, 0, 40 if t.name == "dark" else 20))
         shadow.setOffset(0, 4)
         self.setGraphicsEffect(shadow)
     
@@ -206,36 +373,149 @@ class TimelineHeader(QWidget):
     """时间轴头部 - 显示日期和统计"""
     
     date_changed = Signal(datetime)
+    export_clicked = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_date = datetime.now()
         self._setup_ui()
+        self.apply_theme()
+        get_theme_manager().theme_changed.connect(self.apply_theme)
     
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
         
+        # 日期导航区域
+        nav_layout = QHBoxLayout()
+        nav_layout.setSpacing(8)
+        
+        # 上一天按钮
+        self.prev_btn = QPushButton("◀")
+        self.prev_btn.setFixedSize(32, 32)
+        self.prev_btn.setCursor(Qt.PointingHandCursor)
+        self.prev_btn.clicked.connect(self._go_previous_day)
+        nav_layout.addWidget(self.prev_btn)
+        
         # 日期显示
         self.date_label = QLabel()
-        self.date_label.setStyleSheet("""
-            font-size: 24px;
-            font-weight: 700;
-            color: #F9FAFB;
-        """)
-        layout.addWidget(self.date_label)
+        nav_layout.addWidget(self.date_label)
         
+        # 下一天按钮
+        self.next_btn = QPushButton("▶")
+        self.next_btn.setFixedSize(32, 32)
+        self.next_btn.setCursor(Qt.PointingHandCursor)
+        self.next_btn.clicked.connect(self._go_next_day)
+        nav_layout.addWidget(self.next_btn)
+        
+        # 今天按钮
+        self.today_btn = QPushButton("今天")
+        self.today_btn.setFixedHeight(32)
+        self.today_btn.setCursor(Qt.PointingHandCursor)
+        self.today_btn.clicked.connect(self._go_today)
+        nav_layout.addWidget(self.today_btn)
+        
+        layout.addLayout(nav_layout)
         layout.addStretch()
+        
+        # 导出按钮
+        self.export_btn = QPushButton("📥 导出")
+        self.export_btn.setFixedHeight(32)
+        self.export_btn.setCursor(Qt.PointingHandCursor)
+        self.export_btn.clicked.connect(self.export_clicked.emit)
+        layout.addWidget(self.export_btn)
         
         # 统计信息
         self.stats_label = QLabel()
-        self.stats_label.setStyleSheet("""
-            font-size: 14px;
-            color: #9CA3AF;
-        """)
         layout.addWidget(self.stats_label)
         
         self._update_date_display()
+    
+    def apply_theme(self):
+        """应用主题"""
+        t = get_theme()
+        
+        # 导航按钮样式
+        nav_btn_style = f"""
+            QPushButton {{
+                background-color: {t.bg_tertiary};
+                color: {t.text_primary};
+                border: none;
+                border-radius: 6px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {t.bg_hover};
+            }}
+        """
+        self.prev_btn.setStyleSheet(nav_btn_style)
+        self.next_btn.setStyleSheet(nav_btn_style)
+        
+        # 日期显示
+        self.date_label.setStyleSheet(f"""
+            font-size: 24px;
+            font-weight: 700;
+            color: {t.text_primary};
+            padding: 0 12px;
+        """)
+        
+        # 今天按钮（强调色）
+        self.today_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t.accent};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 0 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {t.accent_hover};
+            }}
+        """)
+        
+        # 导出按钮
+        self.export_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t.bg_tertiary};
+                color: {t.text_primary};
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                padding: 0 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {t.bg_hover};
+            }}
+        """)
+        
+        # 统计信息
+        self.stats_label.setStyleSheet(f"""
+            font-size: 14px;
+            color: {t.text_muted};
+            margin-left: 16px;
+        """)
+    
+    def _go_previous_day(self):
+        """前一天"""
+        self._current_date = self._current_date - timedelta(days=1)
+        self._update_date_display()
+        self.date_changed.emit(self._current_date)
+    
+    def _go_next_day(self):
+        """后一天"""
+        # 不能超过今天
+        if self._current_date.date() < datetime.now().date():
+            self._current_date = self._current_date + timedelta(days=1)
+            self._update_date_display()
+            self.date_changed.emit(self._current_date)
+    
+    def _go_today(self):
+        """回到今天"""
+        self._current_date = datetime.now()
+        self._update_date_display()
+        self.date_changed.emit(self._current_date)
     
     def _update_date_display(self):
         today = datetime.now().date()
@@ -268,12 +548,16 @@ class TimelineView(QWidget):
     """时间轴主视图"""
     
     card_selected = Signal(ActivityCard)
+    date_changed = Signal(datetime)
+    export_requested = Signal(datetime, list)  # 日期, 卡片列表
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cards: List[ActivityCard] = []
         self._current_date = datetime.now()
         self._setup_ui()
+        self.apply_theme()
+        get_theme_manager().theme_changed.connect(self.apply_theme)
     
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -282,33 +566,22 @@ class TimelineView(QWidget):
         
         # 头部
         self.header = TimelineHeader()
+        self.header.date_changed.connect(self._on_date_changed)
+        self.header.export_clicked.connect(self._on_export_clicked)
         main_layout.addWidget(self.header)
         
+        # 统计汇总（带边距）
+        stats_container = QWidget()
+        stats_layout = QHBoxLayout(stats_container)
+        stats_layout.setContentsMargins(24, 0, 24, 12)
+        self.stats_widget = StatsSummaryWidget()
+        stats_layout.addWidget(self.stats_widget)
+        main_layout.addWidget(stats_container)
+        
         # 滚动区域
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-            QScrollBar:vertical {
-                width: 8px;
-                background: transparent;
-            }
-            QScrollBar::handle:vertical {
-                background: #4B5563;
-                border-radius: 4px;
-                min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #6B7280;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0;
-            }
-        """)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         # 卡片容器
         self.cards_container = QWidget()
@@ -317,18 +590,26 @@ class TimelineView(QWidget):
         self.cards_layout.setSpacing(12)
         self.cards_layout.addStretch()
         
-        scroll.setWidget(self.cards_container)
-        main_layout.addWidget(scroll)
+        self.scroll.setWidget(self.cards_container)
+        main_layout.addWidget(self.scroll)
         
         # 空状态提示
         self.empty_label = QLabel("开始录制以生成时间轴")
         self.empty_label.setAlignment(Qt.AlignCenter)
-        self.empty_label.setStyleSheet("""
+        self.cards_layout.insertWidget(0, self.empty_label)
+    
+    def apply_theme(self):
+        """应用主题"""
+        t = get_theme()
+        self.empty_label.setStyleSheet(f"""
             font-size: 16px;
-            color: #6B7280;
+            color: {t.text_muted};
             padding: 60px;
         """)
-        self.cards_layout.insertWidget(0, self.empty_label)
+        
+        # 重新创建卡片以应用新主题
+        if self._cards:
+            self._refresh_cards()
     
     def set_cards(self, cards: List[ActivityCard]):
         """设置卡片列表"""
@@ -341,8 +622,13 @@ class TimelineView(QWidget):
         self._add_card_widget(card)
         self._update_empty_state()
     
-    def _refresh_cards(self):
+    def _refresh_cards(self, scroll_to_bottom: bool = False):
         """刷新所有卡片"""
+        # 保存当前滚动位置
+        scrollbar = self.scroll.verticalScrollBar()
+        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 50
+        old_scroll_value = scrollbar.value()
+        
         # 清除现有卡片
         while self.cards_layout.count() > 1:  # 保留 stretch
             item = self.cards_layout.takeAt(0)
@@ -355,6 +641,22 @@ class TimelineView(QWidget):
         
         self._update_empty_state()
         self._update_stats()
+        
+        # 更新统计图表
+        self.stats_widget.set_data(self._cards)
+        
+        # 恢复滚动位置（延迟执行以等待布局完成）
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
+        
+        # 先处理待处理事件
+        QApplication.processEvents()
+        
+        # 立即尝试恢复滚动
+        if scroll_to_bottom or was_at_bottom:
+            scrollbar.setValue(scrollbar.maximum())
+        else:
+            scrollbar.setValue(min(old_scroll_value, scrollbar.maximum()))
     
     def _add_card_widget(self, card: ActivityCard, animate: bool = True):
         """添加卡片组件"""
@@ -382,3 +684,16 @@ class TimelineView(QWidget):
         """清空时间轴"""
         self._cards = []
         self._refresh_cards()
+    
+    def _on_date_changed(self, date: datetime):
+        """日期切换"""
+        self._current_date = date
+        self.date_changed.emit(date)
+    
+    def _on_export_clicked(self):
+        """导出按钮点击"""
+        self.export_requested.emit(self._current_date, self._cards)
+    
+    def get_current_date(self) -> datetime:
+        """获取当前显示的日期"""
+        return self._current_date
