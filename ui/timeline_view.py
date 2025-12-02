@@ -151,20 +151,19 @@ class StatsSummaryWidget(QFrame):
             self._add_bar(category, minutes)
     
     def set_data(self, cards: list):
-        """根据卡片数据设置统计"""
-        # 清除旧数据
-        while self.chart_container.count():
-            item = self.chart_container.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        
+        """根据卡片数据设置统计 - 优化版本"""
         # 统计各类别时间
-        self._data = {}
+        new_data = {}
         for card in cards:
             category = card.category or "其他"
             minutes = card.duration_minutes
-            self._data[category] = self._data.get(category, 0) + minutes
+            new_data[category] = new_data.get(category, 0) + minutes
         
+        # 如果数据没变化，跳过更新
+        if new_data == self._data:
+            return
+        
+        self._data = new_data
         self._total_minutes = sum(self._data.values())
         
         # 更新总时间
@@ -172,19 +171,31 @@ class StatsSummaryWidget(QFrame):
         mins = int(self._total_minutes % 60)
         self.total_label.setText(f"共 {hours}h {mins}m")
         
-        if not self._data:
-            t = get_theme()
-            empty = QLabel("暂无数据")
-            empty.setStyleSheet(f"color: {t.text_muted}; font-size: 13px;")
-            self.chart_container.addWidget(empty)
-            return
+        # 暂停更新以减少重绘
+        self.chart_widget.setUpdatesEnabled(False)
         
-        # 按时间排序
-        sorted_data = sorted(self._data.items(), key=lambda x: x[1], reverse=True)
-        
-        # 创建柱状图
-        for category, minutes in sorted_data:
-            self._add_bar(category, minutes)
+        try:
+            # 清除旧数据
+            while self.chart_container.count():
+                item = self.chart_container.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            
+            if not self._data:
+                t = get_theme()
+                empty = QLabel("暂无数据")
+                empty.setStyleSheet(f"color: {t.text_muted}; font-size: 13px;")
+                self.chart_container.addWidget(empty)
+                return
+            
+            # 按时间排序
+            sorted_data = sorted(self._data.items(), key=lambda x: x[1], reverse=True)
+            
+            # 创建柱状图
+            for category, minutes in sorted_data:
+                self._add_bar(category, minutes)
+        finally:
+            self.chart_widget.setUpdatesEnabled(True)
     
     def _add_bar(self, category: str, minutes: float):
         """添加一个统计条"""

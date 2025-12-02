@@ -127,6 +127,8 @@ class ThemeManager(QObject):
     
     def set_theme(self, theme: Theme):
         """设置主题"""
+        if self._current_theme == theme:
+            return  # 避免重复切换
         self._current_theme = theme
         self._apply_global_theme()
         self.theme_changed.emit(theme)

@@ -736,64 +736,79 @@ class StatsPanel(QWidget):
         self._load_data()
     
     def _load_data(self):
-        """加载统计数据"""
-        today = datetime.now()
+        """加载统计数据 - 优化版本"""
+        # 防止重复加载
+        if hasattr(self, '_loading') and self._loading:
+            return
+        self._loading = True
         
-        if self._current_range == "week":
-            days = 7
-        else:
-            days = 30
-        
-        # 收集每日数据
-        bar_data = []
-        trend_data = []
-        total_today_minutes = 0
-        
-        for i in range(days - 1, -1, -1):
-            date = today - timedelta(days=i)
-            date_str = date.strftime("%Y-%m-%d")
-            
-            cards = self.storage.get_cards_for_date(date)
-            
-            # 分类统计
-            categories = {}
-            total_score = 0
-            score_count = 0
-            
-            for card in cards:
-                cat = card.category or "其他"
-                minutes = card.duration_minutes
-                categories[cat] = categories.get(cat, 0) + minutes
-                
-                if card.productivity_score > 0:
-                    total_score += card.productivity_score
-                    score_count += 1
-            
-            bar_data.append({
-                "date": date_str,
-                "categories": categories
-            })
-            
-            avg_score = total_score / score_count if score_count > 0 else 0
-            trend_data.append((date_str, avg_score))
-            
-            # 今日总时间
-            if i == 0:
-                total_today_minutes = sum(categories.values())
-        
-        # 更新图表
-        self.bar_chart.set_data(bar_data)
-        self.line_chart.set_data(trend_data)
-        
-        # 更新目标进度
-        self.goal_widget.set_current_hours(total_today_minutes / 60)
-        
-        # 加载保存的目标
-        goal = self.storage.get_setting("daily_goal", "8")
         try:
-            self.goal_widget.set_goal(int(goal))
-        except ValueError:
-            pass
+            today = datetime.now()
+            
+            if self._current_range == "week":
+                days = 7
+            else:
+                days = 30
+            
+            # 暂停更新
+            self.bar_chart.setUpdatesEnabled(False)
+            self.line_chart.setUpdatesEnabled(False)
+            
+            # 收集每日数据
+            bar_data = []
+            trend_data = []
+            total_today_minutes = 0
+            
+            for i in range(days - 1, -1, -1):
+                date = today - timedelta(days=i)
+                date_str = date.strftime("%Y-%m-%d")
+                
+                cards = self.storage.get_cards_for_date(date)
+                
+                # 分类统计
+                categories = {}
+                total_score = 0
+                score_count = 0
+                
+                for card in cards:
+                    cat = card.category or "其他"
+                    minutes = card.duration_minutes
+                    categories[cat] = categories.get(cat, 0) + minutes
+                    
+                    if card.productivity_score > 0:
+                        total_score += card.productivity_score
+                        score_count += 1
+                
+                bar_data.append({
+                    "date": date_str,
+                    "categories": categories
+                })
+                
+                avg_score = total_score / score_count if score_count > 0 else 0
+                trend_data.append((date_str, avg_score))
+                
+                # 今日总时间
+                if i == 0:
+                    total_today_minutes = sum(categories.values())
+            
+            # 更新图表
+            self.bar_chart.set_data(bar_data)
+            self.line_chart.set_data(trend_data)
+            
+            # 更新目标进度
+            self.goal_widget.set_current_hours(total_today_minutes / 60)
+            
+            # 加载保存的目标
+            goal = self.storage.get_setting("daily_goal", "8")
+            try:
+                self.goal_widget.set_goal(int(goal))
+            except ValueError:
+                pass
+        finally:
+            # 恢复更新
+            self.bar_chart.setUpdatesEnabled(True)
+            self.line_chart.setUpdatesEnabled(True)
+            self._loading = False
     
     def _on_goal_changed(self, hours: int):
         """目标改变"""
