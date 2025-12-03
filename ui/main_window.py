@@ -11,8 +11,10 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QStackedWidget, QFrame,
     QLineEdit, QMessageBox, QSystemTrayIcon, QMenu,
     QApplication, QSizePolicy, QSpacerItem, QFileDialog,
-    QScrollArea
+    QScrollArea, QProgressBar
 )
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QSize
 from PySide6.QtGui import QIcon, QAction, QFont, QColor, QPalette
 
@@ -24,6 +26,146 @@ from core.types import ActivityCard
 from database.storage import StorageManager
 
 logger = logging.getLogger(__name__)
+
+
+class TitleBarButton(QPushButton):
+    """标题栏按钮"""
+    
+    def __init__(self, text: str, hover_color: str = None, parent=None):
+        super().__init__(text, parent)
+        self.setFixedSize(46, 32)
+        self.setCursor(Qt.PointingHandCursor)
+        self._hover_color = hover_color or "#3d3d3d"
+        self._is_close = False
+        self.apply_theme()
+    
+    def set_close_button(self, is_close: bool):
+        """设置为关闭按钮样式"""
+        self._is_close = is_close
+        self._hover_color = "#e81123" if is_close else "#3d3d3d"
+        self.apply_theme()
+    
+    def apply_theme(self):
+        t = get_theme()
+        hover_bg = self._hover_color
+        hover_text = "white" if self._is_close else t.text_primary
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                color: {t.text_secondary};
+                font-size: 12px;
+                font-family: "Segoe MDL2 Assets", "Segoe UI Symbol", sans-serif;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+                color: {hover_text};
+            }}
+        """)
+
+
+class CustomTitleBar(QWidget):
+    """自定义标题栏 - VS Code 风格"""
+    
+    minimize_to_tray = Signal()
+    minimize_window = Signal()
+    maximize_window = Signal()
+    close_window = Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(32)
+        self._dragging = False
+        self._drag_pos = None
+        self._setup_ui()
+        self.apply_theme()
+        get_theme_manager().theme_changed.connect(self.apply_theme)
+    
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # 左侧：图标和标题
+        self.icon_label = QLabel("⏱️")
+        self.icon_label.setFixedWidth(24)
+        layout.addWidget(self.icon_label)
+        
+        self.title_label = QLabel("Dayflow")
+        layout.addWidget(self.title_label)
+        
+        layout.addStretch()
+        
+        # 右侧：窗口控制按钮
+        # 最小化到托盘
+        self.tray_btn = TitleBarButton("↓")
+        self.tray_btn.setToolTip("最小化到托盘")
+        self.tray_btn.clicked.connect(self.minimize_to_tray.emit)
+        layout.addWidget(self.tray_btn)
+        
+        # 最小化
+        self.min_btn = TitleBarButton("─")
+        self.min_btn.setToolTip("最小化")
+        self.min_btn.clicked.connect(self.minimize_window.emit)
+        layout.addWidget(self.min_btn)
+        
+        # 最大化/还原
+        self.max_btn = TitleBarButton("□")
+        self.max_btn.setToolTip("最大化")
+        self.max_btn.clicked.connect(self.maximize_window.emit)
+        layout.addWidget(self.max_btn)
+        
+        # 关闭
+        self.close_btn = TitleBarButton("×")
+        self.close_btn.set_close_button(True)
+        self.close_btn.setToolTip("关闭")
+        self.close_btn.clicked.connect(self.close_window.emit)
+        layout.addWidget(self.close_btn)
+    
+    def update_maximize_button(self, is_maximized: bool):
+        """更新最大化按钮图标"""
+        if is_maximized:
+            self.max_btn.setText("❐")
+            self.max_btn.setToolTip("还原")
+        else:
+            self.max_btn.setText("□")
+            self.max_btn.setToolTip("最大化")
+    
+    def apply_theme(self):
+        t = get_theme()
+        self.setStyleSheet(f"background-color: {t.bg_secondary};")
+        self.icon_label.setStyleSheet(f"font-size: 14px;")
+        self.title_label.setStyleSheet(f"""
+            color: {t.text_secondary};
+            font-size: 12px;
+            font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+            padding-left: 4px;
+        """)
+        # 更新按钮主题
+        self.tray_btn.apply_theme()
+        self.min_btn.apply_theme()
+        self.max_btn.apply_theme()
+        self.close_btn.apply_theme()
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._dragging = True
+            self._drag_pos = event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
+            event.accept()
+    
+    def mouseMoveEvent(self, event):
+        if self._dragging and self._drag_pos:
+            self.window().move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+    
+    def mouseReleaseEvent(self, event):
+        self._dragging = False
+        self._drag_pos = None
+    
+    def mouseDoubleClickEvent(self, event):
+        """双击最大化/还原"""
+        if event.button() == Qt.LeftButton:
+            self.maximize_window.emit()
 
 
 class SidebarButton(QPushButton):
@@ -412,11 +554,141 @@ class SettingsPanel(QWidget):
         self.email_result_label.hide()
         email_layout.addWidget(self.email_result_label)
         
+        # === 开机启动 ===
+        autostart_frame, autostart_layout = self._create_card(layout)
+        self._create_title("🚀 开机启动", autostart_layout)
+        
+        autostart_desc = QLabel("开机时自动启动 Dayflow 并最小化到系统托盘")
+        autostart_desc.setObjectName("cardDesc")
+        self._descs.append(autostart_desc)
+        autostart_layout.addWidget(autostart_desc)
+        
+        # 开机启动按钮
+        autostart_btn_row = QHBoxLayout()
+        autostart_btn_row.setSpacing(10)
+        
+        self.autostart_btn = QPushButton("⚪ 未启用")
+        self.autostart_btn.setCursor(Qt.PointingHandCursor)
+        self.autostart_btn.setFixedHeight(38)
+        self.autostart_btn.setCheckable(True)
+        self.autostart_btn.clicked.connect(self._toggle_autostart)
+        autostart_btn_row.addWidget(self.autostart_btn)
+        
+        self.autostart_status = QLabel("")
+        self.autostart_status.setObjectName("cardDesc")
+        self._descs.append(self.autostart_status)
+        autostart_btn_row.addWidget(self.autostart_status)
+        
+        autostart_btn_row.addStretch()
+        autostart_layout.addLayout(autostart_btn_row)
+        
+        # 初始化自启动状态
+        self._init_autostart_status()
+        
+        # === 软件更新 ===
+        update_frame, update_layout = self._create_card(layout)
+        self._create_title("🔄 软件更新", update_layout)
+        self.update_version_label = QLabel(f"当前版本: v{config.VERSION}")
+        self.update_version_label.setObjectName("cardDesc")
+        self._descs.append(self.update_version_label)
+        update_layout.addWidget(self.update_version_label)
+        
+        # 更新按钮行
+        update_btn_row = QHBoxLayout()
+        update_btn_row.setSpacing(10)
+        
+        self.check_update_btn = QPushButton("🔍 检查更新")
+        self.check_update_btn.setCursor(Qt.PointingHandCursor)
+        self.check_update_btn.setFixedHeight(38)
+        self.check_update_btn.clicked.connect(self._check_update)
+        update_btn_row.addWidget(self.check_update_btn)
+        
+        self.update_status_label = QLabel("")
+        self.update_status_label.setObjectName("cardDesc")
+        self._descs.append(self.update_status_label)
+        update_btn_row.addWidget(self.update_status_label)
+        
+        update_btn_row.addStretch()
+        update_layout.addLayout(update_btn_row)
+        
+        # 下载进度条（初始隐藏）
+        self.update_progress = QProgressBar()
+        self.update_progress.setMinimum(0)
+        self.update_progress.setMaximum(100)
+        self.update_progress.setFixedHeight(20)
+        self.update_progress.hide()
+        update_layout.addWidget(self.update_progress)
+        
+        # 更新操作按钮（初始隐藏）
+        self.update_action_row = QHBoxLayout()
+        self.update_action_row.setSpacing(10)
+        
+        self.download_btn = QPushButton("⬇️ 下载更新")
+        self.download_btn.setCursor(Qt.PointingHandCursor)
+        self.download_btn.setFixedHeight(38)
+        self.download_btn.clicked.connect(self._start_download)
+        self.download_btn.hide()
+        self.update_action_row.addWidget(self.download_btn)
+        
+        self.install_btn = QPushButton("🚀 立即安装")
+        self.install_btn.setCursor(Qt.PointingHandCursor)
+        self.install_btn.setFixedHeight(38)
+        self.install_btn.clicked.connect(self._install_update)
+        self.install_btn.hide()
+        self.update_action_row.addWidget(self.install_btn)
+        
+        self.update_action_row.addStretch()
+        update_layout.addLayout(self.update_action_row)
+        
+        # === 日志查看 ===
+        log_frame, log_layout = self._create_card(layout)
+        self._create_title("📋 运行日志", log_layout)
+        
+        log_desc = QLabel("查看应用运行日志，便于排查问题")
+        log_desc.setObjectName("cardDesc")
+        self._descs.append(log_desc)
+        log_layout.addWidget(log_desc)
+        
+        # 日志按钮行
+        log_btn_row = QHBoxLayout()
+        log_btn_row.setSpacing(10)
+        
+        self.view_log_btn = QPushButton("📄 查看日志")
+        self.view_log_btn.setCursor(Qt.PointingHandCursor)
+        self.view_log_btn.setFixedHeight(38)
+        self.view_log_btn.clicked.connect(self._toggle_log_view)
+        log_btn_row.addWidget(self.view_log_btn)
+        
+        self.refresh_log_btn = QPushButton("🔄 刷新")
+        self.refresh_log_btn.setCursor(Qt.PointingHandCursor)
+        self.refresh_log_btn.setFixedHeight(38)
+        self.refresh_log_btn.clicked.connect(self._refresh_log)
+        self.refresh_log_btn.hide()
+        log_btn_row.addWidget(self.refresh_log_btn)
+        
+        self.open_log_folder_btn = QPushButton("📂 打开日志目录")
+        self.open_log_folder_btn.setCursor(Qt.PointingHandCursor)
+        self.open_log_folder_btn.setFixedHeight(38)
+        self.open_log_folder_btn.clicked.connect(self._open_log_folder)
+        log_btn_row.addWidget(self.open_log_folder_btn)
+        
+        log_btn_row.addStretch()
+        log_layout.addLayout(log_btn_row)
+        
+        # 日志显示区域（初始隐藏）
+        from PySide6.QtWidgets import QTextEdit
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setFixedHeight(300)
+        self.log_text.hide()
+        self.log_text.setPlaceholderText("点击「查看日志」加载日志内容...")
+        log_layout.addWidget(self.log_text)
+        
         # === 关于 ===
         about_frame, about_layout = self._create_card(layout)
         self._create_title("ℹ️ 关于 Dayflow", about_layout)
         
-        about_text = QLabel("Windows 版本 1.2.0\n智能时间追踪与生产力分析工具")
+        about_text = QLabel(f"Windows 版本 {config.VERSION}\n智能时间追踪与生产力分析工具")
         about_text.setObjectName("cardDesc")
         about_text.setWordWrap(True)
         self._descs.append(about_text)
@@ -635,6 +907,39 @@ class SettingsPanel(QWidget):
             }}
         """)
         self.email_test_btn.setStyleSheet(data_btn_style)
+        
+        # 日志按钮样式
+        log_btn_style = f"""
+            QPushButton {{
+                background-color: {t.bg_tertiary};
+                color: {t.text_primary};
+                border: 1px solid {t.border};
+                border-radius: 8px;
+                font-size: 13px;
+                padding: 0 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {t.bg_hover};
+                border-color: {t.accent};
+            }}
+        """
+        self.view_log_btn.setStyleSheet(log_btn_style)
+        self.refresh_log_btn.setStyleSheet(log_btn_style)
+        self.open_log_folder_btn.setStyleSheet(log_btn_style)
+        
+        # 日志文本框样式
+        self.log_text.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {t.bg_tertiary};
+                color: {t.text_primary};
+                border: 1px solid {t.border};
+                border-radius: 8px;
+                padding: 12px;
+                font-size: 12px;
+                font-family: "Consolas", "Monaco", "Microsoft YaHei", monospace;
+                line-height: 1.5;
+            }}
+        """)
     
     def _load_settings(self):
         api_key = self.storage.get_setting("api_key", "")
@@ -1024,6 +1329,268 @@ class SettingsPanel(QWidget):
         t = get_theme()
         self.email_result_label.setText(f"❌ 发送失败: {error}")
         self.email_result_label.setStyleSheet(f"font-size: 13px; color: {t.error}; padding: 8px 0;")
+    
+    # ========== 软件更新相关方法 ==========
+    
+    def _check_update(self):
+        """检查更新"""
+        from core.updater import UpdateManager
+        
+        self.check_update_btn.setEnabled(False)
+        self.check_update_btn.setText("检查中...")
+        self.update_status_label.setText("正在检查...")
+        t = get_theme()
+        self.update_status_label.setStyleSheet(f"font-size: 13px; color: {t.text_secondary};")
+        
+        # 初始化更新管理器
+        if not hasattr(self, 'update_manager'):
+            self.update_manager = UpdateManager()
+        
+        import threading
+        def check():
+            info = self.update_manager.check_update()
+            # 回到主线程
+            from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+            QMetaObject.invokeMethod(
+                self, "_on_check_update_result",
+                Qt.QueuedConnection,
+                Q_ARG(bool, info.has_update),
+                Q_ARG(str, info.latest_version),
+                Q_ARG(str, info.release_notes)
+            )
+        
+        threading.Thread(target=check, daemon=True).start()
+    
+    @Slot(bool, str, str)
+    def _on_check_update_result(self, has_update: bool, latest_version: str, release_notes: str):
+        """检查更新结果回调"""
+        self.check_update_btn.setEnabled(True)
+        self.check_update_btn.setText("🔍 检查更新")
+        t = get_theme()
+        
+        if has_update:
+            self.update_status_label.setText(f"发现新版本: v{latest_version}")
+            self.update_status_label.setStyleSheet(f"font-size: 13px; color: {t.success}; font-weight: 600;")
+            self.download_btn.show()
+            self._latest_version = latest_version
+            self._release_notes = release_notes
+        else:
+            self.update_status_label.setText("已是最新版本 ✓")
+            self.update_status_label.setStyleSheet(f"font-size: 13px; color: {t.text_secondary};")
+            self.download_btn.hide()
+    
+    def _start_download(self):
+        """开始下载更新"""
+        self.download_btn.setEnabled(False)
+        self.download_btn.setText("下载中...")
+        self.update_progress.setValue(0)
+        self.update_progress.show()
+        
+        def on_progress(percent):
+            # 回到主线程更新进度
+            from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+            QMetaObject.invokeMethod(
+                self.update_progress, "setValue",
+                Qt.QueuedConnection,
+                Q_ARG(int, int(percent))
+            )
+        
+        def on_complete(success, error):
+            from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+            QMetaObject.invokeMethod(
+                self, "_on_download_complete",
+                Qt.QueuedConnection,
+                Q_ARG(bool, success),
+                Q_ARG(str, error)
+            )
+        
+        self.update_manager.start_download(
+            on_progress=on_progress,
+            on_complete=on_complete
+        )
+    
+    @Slot(bool, str)
+    def _on_download_complete(self, success: bool, error: str):
+        """下载完成回调"""
+        self.download_btn.setEnabled(True)
+        self.download_btn.setText("⬇️ 下载更新")
+        t = get_theme()
+        
+        if success:
+            self.update_progress.setValue(100)
+            self.update_status_label.setText("下载完成，点击安装")
+            self.update_status_label.setStyleSheet(f"font-size: 13px; color: {t.success}; font-weight: 600;")
+            self.download_btn.hide()
+            self.install_btn.show()
+        else:
+            self.update_progress.hide()
+            self.update_status_label.setText(f"下载失败")
+            self.update_status_label.setStyleSheet(f"font-size: 13px; color: {t.error};")
+            self._show_download_failed_dialog(error)
+    
+    def _show_download_failed_dialog(self, error: str):
+        """显示下载失败对话框"""
+        from core.updater import UpdateManager
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("下载失败")
+        msg.setText(f"自动下载失败：{error}")
+        msg.setInformativeText("您可以尝试手动下载：")
+        
+        github_btn = msg.addButton("GitHub 下载", QMessageBox.ActionRole)
+        mirror_btn = msg.addButton("镜像下载(国内加速)", QMessageBox.ActionRole)
+        msg.addButton("取消", QMessageBox.RejectRole)
+        
+        msg.exec()
+        
+        if msg.clickedButton() == github_btn:
+            QDesktopServices.openUrl(QUrl(UpdateManager.get_github_release_url()))
+        elif msg.clickedButton() == mirror_btn:
+            QDesktopServices.openUrl(QUrl(UpdateManager.get_mirror_release_url()))
+    
+    def _install_update(self):
+        """安装更新"""
+        reply = QMessageBox.question(
+            self,
+            "安装更新",
+            f"即将安装 v{self._latest_version}\n\n程序将自动重启，是否继续？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            if self.update_manager.apply_update():
+                # 退出应用，让 updater 接管
+                QApplication.quit()
+            else:
+                QMessageBox.warning(
+                    self,
+                    "安装失败",
+                    "无法启动更新程序，请手动下载安装最新版本。"
+                )
+    
+    def _toggle_log_view(self):
+        """切换日志显示"""
+        if self.log_text.isVisible():
+            self.log_text.hide()
+            self.refresh_log_btn.hide()
+            self.view_log_btn.setText("📄 查看日志")
+        else:
+            self._refresh_log()
+            self.log_text.show()
+            self.refresh_log_btn.show()
+            self.view_log_btn.setText("📄 收起日志")
+    
+    def _refresh_log(self):
+        """刷新日志内容"""
+        log_file = config.APP_DATA_DIR / "dayflow.log"
+        
+        if not log_file.exists():
+            self.log_text.setPlainText("📭 暂无日志文件")
+            return
+        
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                # 读取最后 500 行
+                lines = f.readlines()
+                last_lines = lines[-500:] if len(lines) > 500 else lines
+                content = ''.join(last_lines)
+            
+            self.log_text.setPlainText(content)
+            # 滚动到底部
+            scrollbar = self.log_text.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+            
+        except Exception as e:
+            self.log_text.setPlainText(f"❌ 读取日志失败: {e}")
+    
+    def _open_log_folder(self):
+        """打开日志所在目录"""
+        import subprocess
+        log_dir = config.APP_DATA_DIR
+        
+        if log_dir.exists():
+            # Windows 打开文件夹
+            subprocess.run(['explorer', str(log_dir)])
+        else:
+            QMessageBox.warning(self, "提示", f"日志目录不存在:\n{log_dir}")
+    
+    def _init_autostart_status(self):
+        """初始化自启动状态"""
+        from core.autostart import is_autostart_enabled, is_frozen
+        
+        if not is_frozen():
+            # 开发模式
+            self.autostart_btn.setEnabled(False)
+            self.autostart_btn.setText("⚪ 仅 EXE 可用")
+            self.autostart_status.setText("开发模式下不可用")
+        else:
+            enabled = is_autostart_enabled()
+            self.autostart_btn.setChecked(enabled)
+            self._update_autostart_button()
+    
+    def _toggle_autostart(self):
+        """切换开机启动状态"""
+        from core.autostart import is_autostart_enabled, enable_autostart, disable_autostart
+        
+        currently_enabled = is_autostart_enabled()
+        
+        if currently_enabled:
+            # 禁用
+            success, msg = disable_autostart()
+        else:
+            # 启用
+            success, msg = enable_autostart()
+        
+        if success:
+            self._update_autostart_button()
+            self.autostart_status.setText(msg)
+            self.autostart_status.setStyleSheet("color: #10B981; font-size: 13px;")
+        else:
+            # 恢复按钮状态
+            self.autostart_btn.setChecked(currently_enabled)
+            self.autostart_status.setText(msg)
+            self.autostart_status.setStyleSheet("color: #EF4444; font-size: 13px;")
+    
+    def _update_autostart_button(self):
+        """更新自启动按钮显示"""
+        from core.autostart import is_autostart_enabled
+        
+        t = get_theme()
+        enabled = is_autostart_enabled()
+        self.autostart_btn.setChecked(enabled)
+        
+        if enabled:
+            self.autostart_btn.setText("🟢 已启用")
+            self.autostart_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {t.success};
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    padding: 0 20px;
+                }}
+                QPushButton:hover {{
+                    opacity: 0.9;
+                }}
+            """)
+        else:
+            self.autostart_btn.setText("⚪ 未启用")
+            self.autostart_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {t.bg_tertiary};
+                    color: {t.text_primary};
+                    border: 1px solid {t.border};
+                    border-radius: 8px;
+                    font-size: 13px;
+                    padding: 0 20px;
+                }}
+                QPushButton:hover {{
+                    background-color: {t.bg_hover};
+                    border-color: {t.accent};
+                }}
+            """)
 
 
 class MainWindow(QMainWindow):
@@ -1055,6 +1622,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(config.WINDOW_MIN_WIDTH, config.WINDOW_MIN_HEIGHT)
         self.resize(1100, 700)
         
+        # 设置无边框窗口
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        
         # 设置窗口图标
         self.setWindowIcon(self._create_tray_icon())
     
@@ -1063,15 +1633,31 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         
-        main_layout = QHBoxLayout(central)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        # 整体垂直布局：标题栏 + 内容区
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        
+        # 自定义标题栏
+        self.title_bar = CustomTitleBar(self)
+        self.title_bar.minimize_to_tray.connect(self._minimize_to_tray)
+        self.title_bar.minimize_window.connect(self.showMinimized)
+        self.title_bar.maximize_window.connect(self._toggle_maximize)
+        self.title_bar.close_window.connect(self.close)
+        root_layout.addWidget(self.title_bar)
+        
+        # 内容区容器
+        content_widget = QWidget()
+        content_layout = QHBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        root_layout.addWidget(content_widget)
         
         # ===== 侧边栏 =====
         self.sidebar = QFrame()
         self.sidebar.setFixedWidth(220)
         sidebar_layout = QVBoxLayout(self.sidebar)
-        sidebar_layout.setContentsMargins(12, 20, 12, 20)
+        sidebar_layout.setContentsMargins(12, 16, 12, 20)
         sidebar_layout.setSpacing(4)
         
         # Logo
@@ -1121,7 +1707,7 @@ class MainWindow(QMainWindow):
         self.github_btn.clicked.connect(self._open_github)
         sidebar_layout.addWidget(self.github_btn)
         
-        main_layout.addWidget(self.sidebar)
+        content_layout.addWidget(self.sidebar)
         
         # ===== 主内容区 =====
         self.stack = QStackedWidget()
@@ -1142,7 +1728,7 @@ class MainWindow(QMainWindow):
         self.settings_panel.api_key_saved.connect(self._on_api_key_saved)
         self.stack.addWidget(self.settings_panel)
         
-        main_layout.addWidget(self.stack)
+        content_layout.addWidget(self.stack)
     
     def _create_tray_icon(self) -> QIcon:
         """创建托盘图标"""
@@ -1546,6 +2132,25 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
     
+    def _minimize_to_tray(self):
+        """最小化到系统托盘"""
+        self.hide()
+        self.tray_icon.showMessage(
+            "Dayflow",
+            "应用已最小化到系统托盘",
+            QSystemTrayIcon.Information,
+            2000
+        )
+    
+    def _toggle_maximize(self):
+        """切换最大化/还原"""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+        # 更新标题栏按钮图标
+        self.title_bar.update_maximize_button(self.isMaximized())
+    
     def _on_tray_activated(self, reason):
         """托盘图标被点击"""
         if reason == QSystemTrayIcon.DoubleClick:
@@ -1572,20 +2177,27 @@ class MainWindow(QMainWindow):
         QApplication.quit()
     
     def closeEvent(self, event):
-        """窗口关闭事件 - 最小化到托盘或退出"""
+        """窗口关闭事件 - 询问是否退出"""
         if self._quitting:
             # 真正退出，接受关闭事件
             event.accept()
         else:
-            # 最小化到托盘
-            event.ignore()
-            self.hide()
-            self.tray_icon.showMessage(
-                "Dayflow",
-                "应用已最小化到系统托盘",
-                QSystemTrayIcon.Information,
-                2000
+            # 询问用户
+            reply = QMessageBox.question(
+                self,
+                "退出确认",
+                "确定要退出 Dayflow 吗？\n\n点击「否」将最小化到系统托盘。",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
             )
+            
+            if reply == QMessageBox.Yes:
+                event.ignore()
+                self._quit_app()
+            elif reply == QMessageBox.No:
+                event.ignore()
+                self._minimize_to_tray()
+            else:
+                event.ignore()
     
     def _init_email_scheduler(self):
         """初始化邮件调度器"""

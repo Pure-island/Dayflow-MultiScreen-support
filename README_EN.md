@@ -56,17 +56,18 @@
 
 | Feature | Description |
 |---------|-------------|
-| 📧 **Email Reports** | Auto-send productivity reports to your email at 12:00 and 22:00 daily |
+| 📧 **Email Reports** | Auto-send productivity reports at 12:00 and 22:00 daily |
+| 📋 **Deep Analysis Report** | Professional behavior analysis, bottleneck detection, improvement strategies |
 | 🤖 **AI Comments** | AI-generated personalized daily summary with friendly encouragement |
+| 🔄 **Auto Update** | Check for updates, background download, one-click install |
+| 🚀 **Auto Start** | Launch on system startup, minimize to tray automatically |
+| 🪟 **Custom Title Bar** | VS Code style, built-in log viewer, minimize to tray |
 | 📊 **Statistics Panel** | New stats page with time distribution and productivity trends |
 | 📅 **Date Navigation** | View history with previous/next day and quick "Today" buttons |
-| 📥 **CSV Export** | One-click export activity data to CSV for analysis and archiving |
+| 📥 **CSV Export** | One-click export activity data to CSV for analysis |
 | ⏸️ **Pause Recording** | Pause when handling private content, resume when done |
-| 📊 **Time Distribution** | Visual bar chart showing time allocation by category |
 | 🎨 **Theme Switching** | IDE-style dark/light themes with auto-saved preferences |
-| 🔽 **System Tray** | Minimize to tray on close, keeps running in background |
 | 📦 **EXE Packaging** | Build standalone executable, no Python required |
-| ⭐ **GitHub Link** | Quick link to project page in sidebar |
 
 ---
 
@@ -101,24 +102,84 @@
 
 *Daily Productivity Report: Time statistics, category distribution, and AI personalized feedback (different scenarios)*
 
+#### Deep Analysis Report
+
+![Deep Analysis Report](assets/Dayflow_Email_DeepAnalysis.png)
+
+*Professional Analysis: Behavior pattern diagnosis, bottleneck identification, improvement strategies*
+
+Each email contains two levels of analysis:
+
+| Module | Content | Style |
+|--------|---------|-------|
+| 💬 **Daily Insight** | Interesting findings + quick tips | Friendly chat |
+| 📋 **Professional Analysis** | Deep behavior analysis + strategies | Expert-level |
+
+Professional analysis dimensions:
+
+| Dimension | Description |
+|-----------|-------------|
+| 🔍 **Behavior Pattern** | Identify work type (Deep Work / Fragmented / Multi-tasking) |
+| ⚠️ **Efficiency Bottlenecks** | Data-driven identification of low-efficiency periods |
+| ✨ **Highlights** | Positive feedback supported by data |
+| 📝 **Improvement Strategies** | 2-3 specific actionable suggestions |
+
 #### Feature Highlights
 
 | Feature | Description |
 |---------|-------------|
 | ⏰ **Scheduled Push** | Auto-send reports at 12:00 and 22:00 daily |
-| 📊 **Data Summary** | Total tracked time and efficiency score at a glance |
-| 📈 **Category Stats** | Visual breakdown of time spent by category |
-| 🤖 **AI Feedback** | Personalized suggestions based on daily performance |
-| 💬 **Friendly Tone** | Warm encouragement, like a friend caring about your productivity |
+| 📊 **Data Summary** | Total time, efficiency score, deep work sessions |
+| 📈 **Category Stats** | Visual breakdown with efficiency comparison |
+| 🎯 **Focus Analysis** | Longest focus, fragmentation ratio, hourly efficiency |
+| 🤖 **Dual Analysis** | Friendly comment + Professional deep report |
+
+### 🔄 Auto Update
+
+![Auto Update](assets/Dayflow_AutoUpdate.png)
+
+*Software Update: One-click check, background download, auto install*
+
+Dayflow supports automatic update detection and installation:
+
+| Feature | Description |
+|---------|-------------|
+| 🔍 **Check Updates** | One-click check for latest GitHub releases |
+| ⬇️ **Background Download** | Multi-source download with mirror acceleration |
+| 📊 **Download Progress** | Real-time progress bar display |
+| 🚀 **One-Click Install** | Auto restart and install after download |
+| 🔗 **Manual Download** | Fallback download links for restricted networks |
+
+Update process:
+1. Click **🔍 Check Updates** to detect new version
+2. Click **⬇️ Download Update** when available
+3. Click **🚀 Install Now** after download completes
+4. App auto-restarts and completes update
+
+### 🚀 Auto Start
+
+![Auto Start](assets/Dayflow_AutoStart.png)
+
+*Startup: Auto-launch on boot, silent minimize to tray*
+
+| Feature | Description |
+|---------|-------------|
+| 🟢 **One-Click Toggle** | Quick enable/disable in settings |
+| 🔇 **Silent Start** | Minimizes to tray on boot, no interruption |
+| 📍 **Path Detection** | Auto-prompts to update path when EXE is moved |
+| 🔒 **No Admin Required** | Uses user-level registry, no admin privileges needed |
+
+> 💡 **Note**: Auto-start is only available in the packaged EXE version, not in development mode.
 
 ### Interface Guide
 
 | Area | Function |
 |------|----------|
-| **Left Sidebar** | Navigation: Timeline, Settings, Recording Control |
+| **Custom Title Bar** | VS Code style, drag to move, minimize to tray |
+| **Left Sidebar** | Navigation: Timeline, Statistics, Settings, Recording |
 | **Timeline Page** | Displays all activity cards for today, sorted by time |
-| **Activity Cards** | Shows time range, category, app, summary, productivity score |
-| **Settings Page** | Configure API Key, test connection, recording parameters |
+| **Statistics Page** | View weekly/monthly time distribution and trends |
+| **Settings Page** | API config, email, theme, auto-start, updates, logs |
 | **System Tray** | Runs in tray when minimized, right-click menu for control |
 
 ### Activity Card Details
@@ -214,9 +275,25 @@ After building, the `dist/Dayflow/` folder can be copied and shared directly.
 - 📈 Time distribution by category
 - 💬 AI-generated personalized feedback and suggestions
 
-### 5️⃣ System Tray
+### 5️⃣ Auto Start (Optional)
 
-- Close window → Minimizes to tray, keeps running
+1. Go to **Settings** → **Auto Start**
+2. Click button to enable/disable
+3. When enabled, app auto-launches and minimizes to tray on boot
+
+> 💡 If you move the EXE file, the app will prompt you to update the startup path.
+
+### 6️⃣ Check Updates (Optional)
+
+1. Go to **Settings** → **Software Update**
+2. Click **Check Updates**
+3. Click **Download Update** when new version is found
+4. Click **Install Now** after download completes
+
+### 7️⃣ System Tray
+
+- Click title bar ↓ button → Minimize to tray
+- Click close × → Prompts to exit or minimize
 - Double-click tray icon → Open main window
 - Right-click tray → Control recording / Exit
 
@@ -226,26 +303,30 @@ After building, the `dist/Dayflow/` folder can be copied and shared directly.
 
 ```
 Dayflow/
-├── 📄 main.py              # Entry point
-├── ⚙️ config.py            # Configuration
+├── 📄 main.py              # Entry point (supports --minimized)
+├── ⚙️ config.py            # Configuration (includes version)
 ├── 📦 requirements.txt     # Dependencies
 ├── 🔨 build.py             # EXE build script
 ├── 🔨 build.bat            # One-click build batch
+├── 🔄 updater.py           # Standalone update program
 │
 ├── 🧠 core/                # Core logic
 │   ├── types.py            # Data models
 │   ├── recorder.py         # Screen capture (dxcam)
 │   ├── llm_provider.py     # AI API integration
 │   ├── analysis.py         # Analysis scheduler
-│   └── email_service.py    # Email report service
+│   ├── email_service.py    # Email reports + Deep analysis
+│   ├── updater.py          # Version check + Multi-source download
+│   └── autostart.py        # Auto-start management
 │
 ├── 💾 database/            # Data layer
 │   ├── schema.sql          # Table definitions
 │   └── storage.py          # SQLite management
 │
 ├── 🎨 ui/                  # UI layer
-│   ├── main_window.py      # Main window
+│   ├── main_window.py      # Main window + Settings panel
 │   ├── timeline_view.py    # Timeline component
+│   ├── stats_view.py       # Statistics panel
 │   └── themes.py           # Theme management
 │
 └── 🖼️ assets/              # Resources
@@ -268,9 +349,11 @@ Dayflow/
 
 ```
 %LOCALAPPDATA%\Dayflow\
-├── dayflow.db      # Database
-├── chunks/         # Video chunks (auto-deleted after analysis)
-└── dayflow.log     # Runtime logs
+├── dayflow.db          # Database (activity records, settings)
+├── dayflow.log         # Runtime logs
+├── chunks/             # Video chunks (auto-deleted after analysis)
+└── updates/            # Update file cache
+    └── Dayflow_vX.X.X.exe  # Downloaded new version
 ```
 
 ---

@@ -4,6 +4,10 @@ Dayflow Windows - 配置文件
 import os
 from pathlib import Path
 
+# 版本信息
+VERSION = "1.2.0"
+GITHUB_REPO = "SeiShonagon520/Dayflow"
+
 # API 配置 (OpenAI 兼容格式)
 API_BASE_URL = os.getenv("DAYFLOW_API_URL", "https://apis.iflow.cn/v1")
 API_KEY = os.getenv("DAYFLOW_API_KEY", "")
