@@ -11,6 +11,8 @@
 
 *Silent Background Recording → AI Analysis → Visual Timeline*
 
+[![Download](https://img.shields.io/badge/⬇️_Download-EXE-brightgreen?style=for-the-badge)](https://github.com/SeiShonagon520/Dayflow/releases)
+
 [中文](README.md) | **English**
 
 </div>

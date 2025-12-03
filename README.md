@@ -11,6 +11,8 @@
 
 *后台静默录屏 → AI 智能分析 → 可视化时间轴*
 
+[![Download](https://img.shields.io/badge/⬇️_下载安装包-EXE-brightgreen?style=for-the-badge)](https://github.com/SeiShonagon520/Dayflow/releases)
+
 **中文** | [English](README_EN.md)
 
 </div>
