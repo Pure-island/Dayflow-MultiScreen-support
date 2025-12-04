@@ -13,12 +13,16 @@ def build():
     args = [
         sys.executable, "-m", "PyInstaller",
         "--name=Dayflow",
-        "--onedir",                    # 生成目录（比 onefile 启动更快）
+        "--onedir",                    # 生成目录
         "--windowed",                  # 无控制台窗口
-        "--icon=assets/icon.ico",      # 应用图标（如果有的话）
+        "--clean",                     # 清理缓存
+        "--icon=assets/icon.ico",      # 应用图标
         "--add-data=database/schema.sql;database",  # 包含数据库架构
+        
+        # PySide6 6.8.1 通常只需要这些
         "--hidden-import=PySide6.QtSvg",
         "--hidden-import=PySide6.QtSvgWidgets", 
+        
         "--collect-all=dxcam",         # 收集 dxcam 所有文件
         "--noconfirm",                 # 覆盖已有输出
         "main.py"
