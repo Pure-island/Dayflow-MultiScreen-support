@@ -99,11 +99,12 @@ def apply_update() -> bool:
         return False
     
     current_exe = Path(current_exe_path)
-    backup_exe = current_exe.with_suffix('.exe.backup')
+    app_dir = current_exe.parent  # 应用目录（包含 DLL 等）
+    backup_dir = app_data_dir / "backup"
     
     logger.info(f"原 EXE: {current_exe}")
+    logger.info(f"应用目录: {app_dir}")
     logger.info(f"新 EXE: {new_exe}")
-    logger.info(f"备份: {backup_exe}")
     
     # 检查新版本文件
     if not new_exe.exists():
@@ -116,25 +117,48 @@ def apply_update() -> bool:
             logger.warning("无法确认主程序已退出，尝试继续...")
     
     try:
-        # 备份旧版本
+        # 备份旧版本 EXE
+        logger.info("备份旧版本...")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_exe = backup_dir / "Dayflow.exe.backup"
         if current_exe.exists():
-            logger.info("备份旧版本...")
             if backup_exe.exists():
                 backup_exe.unlink()
             shutil.copy2(current_exe, backup_exe)
         
-        # 替换为新版本
-        logger.info("安装新版本...")
+        # 替换 EXE
+        logger.info("安装新版本 EXE...")
         if current_exe.exists():
             current_exe.unlink()
         shutil.copy2(new_exe, current_exe)
         
+        # 复制其他文件（DLL、_internal 目录等）
+        logger.info("复制依赖文件...")
+        skip_files = {'Dayflow_new.exe', 'update_info.json'}
+        skip_extensions = {'.tmp', '.zip'}
+        
+        for item in pending_dir.iterdir():
+            if item.name in skip_files:
+                continue
+            if item.suffix.lower() in skip_extensions:
+                continue
+            
+            dest = app_dir / item.name
+            
+            if item.is_file():
+                logger.info(f"  复制文件: {item.name}")
+                if dest.exists():
+                    dest.unlink()
+                shutil.copy2(item, dest)
+            elif item.is_dir():
+                logger.info(f"  复制目录: {item.name}")
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(item, dest)
+        
         # 清理待更新目录
         logger.info("清理临时文件...")
         shutil.rmtree(pending_dir, ignore_errors=True)
-        
-        # 删除备份（可选，保留一次备份也可以）
-        # backup_exe.unlink(missing_ok=True)
         
         logger.info("更新完成!")
         return True
@@ -143,6 +167,7 @@ def apply_update() -> bool:
         logger.error(f"更新失败: {e}")
         
         # 尝试回滚
+        backup_exe = backup_dir / "Dayflow.exe.backup"
         if backup_exe.exists():
             logger.info("尝试回滚...")
             try:

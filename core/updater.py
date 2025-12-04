@@ -8,6 +8,7 @@ import json
 import logging
 import threading
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Optional, Callable, Tuple
 from dataclasses import dataclass
@@ -77,13 +78,18 @@ class UpdateChecker:
             if self._compare_versions(info.latest_version, self.current_version) > 0:
                 info.has_update = True
                 
-                # 查找 EXE 下载链接
+                # 查找下载链接（优先 ZIP，其次 EXE）
                 for asset in data.get('assets', []):
-                    if asset['name'].lower().endswith('.exe'):
+                    name_lower = asset['name'].lower()
+                    if name_lower.endswith('.zip'):
                         info.download_url = asset['browser_download_url']
                         info.file_size = asset.get('size', 0)
                         info.filename = asset['name']
                         break
+                    elif name_lower.endswith('.exe') and not info.filename:
+                        info.download_url = asset['browser_download_url']
+                        info.file_size = asset.get('size', 0)
+                        info.filename = asset['name']
             
             logger.info(f"版本检查完成: 当前 {self.current_version}, 最新 {info.latest_version}")
             return info
@@ -137,7 +143,12 @@ class UpdateDownloader:
         
         # 下载目录
         self.pending_dir = config.APP_DATA_DIR / "pending_update"
-        self.target_path = self.pending_dir / "Dayflow_new.exe"
+        self.is_zip = update_info.filename.lower().endswith('.zip') if update_info.filename else False
+        
+        if self.is_zip:
+            self.target_path = self.pending_dir / update_info.filename
+        else:
+            self.target_path = self.pending_dir / "Dayflow_new.exe"
         
         self._cancelled = False
     
@@ -172,11 +183,15 @@ class UpdateDownloader:
                     filename=filename
                 )
                 
-                logger.info(f"尝试下载源: {url[:50]}...")
+                logger.info(f"尝试下载源: {url[:70]}...")
                 
                 try:
                     success = self._download_from_url(url)
                     if success:
+                        # 如果是 ZIP，解压
+                        if self.is_zip:
+                            self._extract_zip()
+                        
                         # 下载成功，写入更新信息
                         self._save_update_info()
                         
@@ -232,6 +247,52 @@ class UpdateDownloader:
         except Exception as e:
             temp_path.unlink(missing_ok=True)
             raise e
+    
+    def _extract_zip(self):
+        """解压 ZIP 文件"""
+        extract_dir = self.pending_dir / "extracted"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"正在解压: {self.target_path}")
+        
+        with zipfile.ZipFile(self.target_path, 'r') as zf:
+            zf.extractall(extract_dir)
+        
+        # 查找解压后的 Dayflow.exe
+        # 可能在根目录或子目录中
+        exe_path = None
+        for root, dirs, files in os.walk(extract_dir):
+            for f in files:
+                if f.lower() == 'dayflow.exe':
+                    exe_path = Path(root) / f
+                    break
+            if exe_path:
+                break
+        
+        if exe_path:
+            # 移动到 pending_dir/Dayflow_new.exe
+            new_exe_path = self.pending_dir / "Dayflow_new.exe"
+            shutil.move(str(exe_path), str(new_exe_path))
+            
+            # 复制同目录下的其他文件（DLL 等依赖）
+            exe_dir = exe_path.parent
+            for item in exe_dir.iterdir():
+                if item.is_file() and item != exe_path:
+                    dest = self.pending_dir / item.name
+                    shutil.copy2(str(item), str(dest))
+                elif item.is_dir():
+                    dest_dir = self.pending_dir / item.name
+                    if dest_dir.exists():
+                        shutil.rmtree(dest_dir)
+                    shutil.copytree(str(item), str(dest_dir))
+            
+            logger.info(f"解压完成，找到 EXE: {new_exe_path}")
+        else:
+            raise FileNotFoundError("ZIP 中未找到 Dayflow.exe")
+        
+        # 清理
+        self.target_path.unlink(missing_ok=True)
+        shutil.rmtree(extract_dir, ignore_errors=True)
     
     def _save_update_info(self):
         """保存更新信息"""
