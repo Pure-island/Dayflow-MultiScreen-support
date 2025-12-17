@@ -1897,6 +1897,54 @@ class MainWindow(QMainWindow):
         if index == 1:
             self.stats_panel.refresh()
     
+    def auto_start_recording(self):
+        """自启动后自动开始录制（静默模式）"""
+        # 从存储中重新加载 API Key，确保使用最新配置
+        api_key = self.storage.get_setting("api_key", "")
+        if api_key:
+            config.API_KEY = api_key
+        
+        # 检查 API Key 是否已配置
+        if not config.API_KEY:
+            logger.warning("自启动时未检测到 API Key，跳过自动录制")
+            # 静默启动时不弹窗，只在日志中记录
+            return
+        
+        # 延迟一小段时间，确保窗口和组件已完全初始化
+        QTimer.singleShot(1000, self._do_auto_start_recording)
+    
+    def _do_auto_start_recording(self):
+        """执行自动开始录制"""
+        try:
+            if self.recording_manager is None:
+                from core.recorder import RecordingManager
+                self.recording_manager = RecordingManager(self.storage)
+            
+            # 如果已经在录制，则跳过
+            if self.recording_manager.is_recording:
+                logger.info("录制已在进行中，跳过自动启动")
+                return
+            
+            logger.info("自启动后自动开始录制...")
+            self.recording_manager.start_recording()
+            self._start_analysis()
+            self._update_record_button(True)
+            self.recording_indicator.set_recording(True)
+            self.tray_record_action.setText("⏹ 停止录制")
+            self.pause_btn.setEnabled(True)
+            self.tray_pause_action.setEnabled(True)
+            
+            # 显示托盘提示
+            self.tray_icon.showMessage(
+                "Dayflow",
+                "已自动开始录制 ✓",
+                QSystemTrayIcon.Information,
+                2000
+            )
+            logger.info("自动录制已启动")
+        except Exception as e:
+            logger.error(f"自动开始录制失败: {e}")
+    
     def _toggle_recording(self):
         """切换录制状态"""
         if self.recording_manager is None:

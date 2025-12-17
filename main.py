@@ -149,6 +149,8 @@ def main():
     if args.minimized:
         # 最小化启动：不显示窗口，只显示托盘图标
         logger.info("静默启动，最小化到托盘")
+        # 自启动后自动开始录制
+        window.auto_start_recording()
     else:
         window.show()
         logger.info("主窗口已显示")
