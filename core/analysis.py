@@ -192,9 +192,23 @@ class AnalysisScheduler:
                     logger.warning(f"切片文件不存在: {chunk.file_path}")
                     continue
                 
+                # 读取窗口记录
+                window_records = None
+                if chunk.window_records_path:
+                    window_records_file = Path(chunk.window_records_path)
+                    if window_records_file.exists():
+                        try:
+                            import json
+                            with open(window_records_file, 'r', encoding='utf-8') as f:
+                                window_records = json.load(f)
+                            logger.debug(f"已加载 {len(window_records)} 条窗口记录")
+                        except Exception as e:
+                            logger.warning(f"读取窗口记录失败: {e}")
+                
                 observations = await self.provider.transcribe_video(
                     chunk.file_path,
-                    chunk.duration_seconds
+                    chunk.duration_seconds,
+                    window_records=window_records
                 )
                 
                 # 调整时间戳（相对于批次开始时间）
@@ -260,19 +274,27 @@ class AnalysisScheduler:
     
     def _delete_chunk_files(self, chunks: List[VideoChunk]):
         """
-        删除已分析完成的视频切片文件
+        删除已分析完成的视频切片文件和窗口记录文件
         只在分析成功后调用，确保数据已保存到数据库
         """
         deleted_count = 0
         for chunk in chunks:
             try:
+                # 删除视频文件
                 chunk_path = Path(chunk.file_path)
                 if chunk_path.exists():
                     chunk_path.unlink()
                     deleted_count += 1
                     logger.debug(f"已删除视频切片: {chunk_path.name}")
+                
+                # 删除窗口记录文件
+                if chunk.window_records_path:
+                    window_records_path = Path(chunk.window_records_path)
+                    if window_records_path.exists():
+                        window_records_path.unlink()
+                        logger.debug(f"已删除窗口记录: {window_records_path.name}")
             except Exception as e:
-                logger.warning(f"删除视频切片失败 {chunk.file_path}: {e}")
+                logger.warning(f"删除文件失败 {chunk.file_path}: {e}")
         
         if deleted_count > 0:
             logger.info(f"已清理 {deleted_count} 个视频切片文件")

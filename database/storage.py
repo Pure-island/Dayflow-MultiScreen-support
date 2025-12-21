@@ -55,6 +55,22 @@ class StorageManager:
         with self._get_connection() as conn:
             with open(schema_path, "r", encoding="utf-8") as f:
                 conn.executescript(f.read())
+            
+            # 数据库迁移：为旧数据库添加新字段
+            self._migrate_database(conn)
+    
+    def _migrate_database(self, conn):
+        """数据库迁移 - 添加新字段"""
+        try:
+            # 检查 chunks 表是否有 window_records_path 字段
+            cursor = conn.execute("PRAGMA table_info(chunks)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if "window_records_path" not in columns:
+                conn.execute("ALTER TABLE chunks ADD COLUMN window_records_path TEXT")
+                logger.info("数据库迁移: 添加 chunks.window_records_path 字段")
+        except Exception as e:
+            logger.debug(f"数据库迁移检查: {e}")
     
     def _get_cached_connection(self):
         """获取线程本地的缓存连接（兼容模式）"""
@@ -114,8 +130,8 @@ class StorageManager:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO chunks (file_path, start_time, end_time, duration_seconds, status, batch_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO chunks (file_path, start_time, end_time, duration_seconds, status, batch_id, window_records_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     chunk.file_path,
@@ -123,7 +139,8 @@ class StorageManager:
                     chunk.end_time.isoformat() if chunk.end_time else None,
                     chunk.duration_seconds,
                     chunk.status.value,
-                    chunk.batch_id
+                    chunk.batch_id,
+                    chunk.window_records_path
                 )
             )
             return cursor.lastrowid
@@ -158,6 +175,13 @@ class StorageManager:
     
     def _row_to_chunk(self, row: sqlite3.Row) -> VideoChunk:
         """将数据库行转换为 VideoChunk 对象"""
+        # 安全获取 window_records_path（兼容旧数据库）
+        window_records_path = None
+        try:
+            window_records_path = row["window_records_path"]
+        except (IndexError, KeyError):
+            pass
+        
         return VideoChunk(
             id=row["id"],
             file_path=row["file_path"],
@@ -165,7 +189,8 @@ class StorageManager:
             end_time=datetime.fromisoformat(row["end_time"]) if row["end_time"] else None,
             duration_seconds=row["duration_seconds"],
             status=ChunkStatus(row["status"]),
-            batch_id=row["batch_id"]
+            batch_id=row["batch_id"],
+            window_records_path=window_records_path
         )
     
     # ==================== Batches ====================

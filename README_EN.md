@@ -47,6 +47,7 @@
 | Feature | Description |
 |---------|-------------|
 | 🎥 **Low-Power Recording** | 1 FPS ultra-low resource usage, runs silently in background |
+| 🪟 **Window Tracking** | Uses Windows API to capture real app names and window titles |
 | 🤖 **AI-Powered Analysis** | Vision LLM identifies screen activities and auto-categorizes |
 | 📊 **Timeline Visualization** | Intuitive daily time allocation view at a glance |
 | 💡 **Productivity Insights** | AI-driven efficiency assessment and improvement suggestions |
@@ -56,6 +57,8 @@
 
 | Feature | Description |
 |---------|-------------|
+| 🪟 **Window Tracking** | Auto-capture real app names via Windows API for more accurate AI recognition |
+| 📊 **Web Dashboard** | Export beautiful HTML reports with interactive charts, shareable |
 | 📧 **Email Reports** | Auto-send productivity reports with customizable send times |
 | 📋 **Deep Analysis Report** | Professional behavior analysis, bottleneck detection, improvement strategies |
 | 🤖 **AI Comments** | AI-generated personalized daily summary with friendly encouragement |
@@ -85,6 +88,41 @@
 ![Dayflow Statistics](assets/Dayflow_Statistics.png)
 
 *Statistics: View weekly/monthly time distribution and productivity trends*
+
+### 📊 Web Dashboard
+
+#### Date Selection
+
+![Dashboard Date Selection](assets/Dayflow_Dashboard_Dialog.png)
+
+*Date Range Selection: Supports Today, Yesterday, This Week, Last Week, This Month, Custom Range*
+
+#### Dashboard Report
+
+![Web Dashboard](assets/Dayflow_Dashboard_Report.png)
+
+*Web Dashboard: Beautiful HTML report with interactive charts, viewable in browser or shareable*
+
+The Web Dashboard feature lets you export your productivity data as a beautiful HTML report:
+
+| Feature | Description |
+|---------|-------------|
+| 📈 **Overview Cards** | Total duration, average efficiency, deep work time, activity count |
+| 🥧 **Time Distribution Pie** | Visual breakdown of time by category |
+| 📊 **Hourly Efficiency Chart** | See efficiency changes throughout the day |
+| 📅 **Weekly Trend Chart** | Last 7 days duration and efficiency trends |
+| 🏆 **App Leaderboard** | Top 5 most used apps with usage time |
+| 📋 **Activity Timeline** | Complete activity list with category filtering |
+| 🎨 **Dark Theme** | Consistent with Dayflow desktop style |
+| 📱 **Responsive Design** | Works on mobile, tablet, and desktop |
+
+How to use:
+1. Go to **Settings** → **Data Management**
+2. Click **📊 Export Dashboard**
+3. Select date range (Today/This Week/This Month/Custom)
+4. Click **Export Report**, opens automatically in browser
+
+> 💡 The exported HTML file is self-contained and can be shared directly with others - no software installation required.
 
 ### 📧 Email Report Feature
 
@@ -321,13 +359,16 @@ Dayflow/
 ├── 🧠 core/                # Core logic
 │   ├── types.py            # Data models
 │   ├── recorder.py         # Screen capture (dxcam)
+│   ├── window_tracker.py   # Window tracking (Windows API)
 │   ├── llm_provider.py     # AI API integration
 │   ├── analysis.py         # Analysis scheduler
 │   ├── email_service.py    # Email reports + Deep analysis + Smart catch-up
 │   ├── updater.py          # Version check + Multi-source download
 │   ├── autostart.py        # Auto-start management
 │   ├── config_manager.py   # Centralized config management
-│   └── log_manager.py      # Log rotation management
+│   ├── log_manager.py      # Log rotation management
+│   ├── stats_collector.py  # Statistics data collector
+│   └── dashboard_exporter.py # Web dashboard export
 │
 ├── 💾 database/            # Data layer
 │   ├── schema.sql          # Table definitions
@@ -338,7 +379,11 @@ Dayflow/
 │   ├── main_window.py      # Main window + Settings panel
 │   ├── timeline_view.py    # Timeline component
 │   ├── stats_view.py       # Statistics panel
+│   ├── date_range_dialog.py # Date range selection dialog
 │   └── themes.py           # Theme management
+│
+├── 📄 templates/           # HTML templates
+│   └── dashboard.html      # Web dashboard template
 │
 └── 🖼️ assets/              # Resources
     └── icon.ico            # App icon

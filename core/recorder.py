@@ -5,9 +5,10 @@ Dayflow Windows - 屏幕录制模块
 import time
 import logging
 import threading
+import json
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Optional, Callable, List, Dict
 from queue import Queue, Empty
 
 import dxcam
@@ -16,6 +17,7 @@ import cv2
 
 import config
 from core.types import VideoChunk, ChunkStatus
+from core.window_tracker import get_tracker, WindowInfo
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,10 @@ class ScreenRecorder:
         self._current_chunk_path: Optional[Path] = None
         self._current_chunk_start: Optional[datetime] = None
         self._frame_count = 0
+        
+        # 窗口追踪
+        self._window_tracker = get_tracker()
+        self._current_window_records: List[Dict] = []  # 当前切片的窗口记录
         
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -158,10 +164,22 @@ class ScreenRecorder:
                     time.sleep(0.1)
                     continue
                 
-                # 检查是否需要创建新切片
+                # 检查是否需要创建新切片（先创建切片，再采集窗口信息）
                 if self._should_create_new_chunk():
                     self._finalize_current_chunk()
                     self._create_new_chunk(frame.shape)
+                
+                # 采集当前窗口信息（在切片创建后采集，确保 _current_chunk_start 有效）
+                if self._current_chunk_start:
+                    window_info = self._window_tracker.get_active_window()
+                    if window_info:
+                        elapsed = (datetime.now() - self._current_chunk_start).total_seconds()
+                        self._current_window_records.append({
+                            "timestamp": elapsed,
+                            "app_name": self._window_tracker.get_friendly_app_name(window_info),
+                            "window_title": window_info.window_title,
+                            "process_name": window_info.app_name
+                        })
                 
                 # 写入帧
                 if self._current_writer:
@@ -189,6 +207,7 @@ class ScreenRecorder:
         self._current_chunk_path = self.output_dir / filename
         self._current_chunk_start = timestamp
         self._frame_count = 0
+        self._current_window_records = []  # 重置窗口记录
         
         # 创建 VideoWriter
         height, width = frame_shape[:2]
@@ -214,16 +233,29 @@ class ScreenRecorder:
             end_time = datetime.now()
             duration = (end_time - self._current_chunk_start).total_seconds()
             
+            # 保存窗口记录到 JSON 文件
+            window_records_path = None
+            if self._current_window_records:
+                window_records_path = self._current_chunk_path.with_suffix('.json')
+                try:
+                    with open(window_records_path, 'w', encoding='utf-8') as f:
+                        json.dump(self._current_window_records, f, ensure_ascii=False, indent=2)
+                    logger.debug(f"窗口记录已保存: {window_records_path.name}")
+                except Exception as e:
+                    logger.warning(f"保存窗口记录失败: {e}")
+                    window_records_path = None
+            
             # 创建切片对象
             chunk = VideoChunk(
                 file_path=str(self._current_chunk_path),
                 start_time=self._current_chunk_start,
                 end_time=end_time,
                 duration_seconds=duration,
-                status=ChunkStatus.PENDING
+                status=ChunkStatus.PENDING,
+                window_records_path=str(window_records_path) if window_records_path else None
             )
             
-            logger.info(f"切片已保存: {self._current_chunk_path.name} ({duration:.1f}秒, {self._frame_count}帧)")
+            logger.info(f"切片已保存: {self._current_chunk_path.name} ({duration:.1f}秒, {self._frame_count}帧, {len(self._current_window_records)}条窗口记录)")
             
             # 回调通知
             if self.on_chunk_saved:
@@ -236,6 +268,7 @@ class ScreenRecorder:
         self._current_chunk_path = None
         self._current_chunk_start = None
         self._frame_count = 0
+        self._current_window_records = []
 
 
 class RecordingManager:

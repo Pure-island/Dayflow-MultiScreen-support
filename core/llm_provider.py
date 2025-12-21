@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 
 import httpx
@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 # 系统提示词
 TRANSCRIBE_SYSTEM_PROMPT = """你是一个屏幕活动分析助手。分析用户提供的屏幕截图序列，识别用户正在进行的活动。
+
+我会提供：
+1. 屏幕截图序列
+2. 系统采集的真实窗口信息（包含应用名称和窗口标题）
 
 请以 JSON 格式返回观察记录列表，格式如下：
 {
@@ -37,8 +41,8 @@ TRANSCRIBE_SYSTEM_PROMPT = """你是一个屏幕活动分析助手。分析用�
 
 注意：
 - start_ts 和 end_ts 是相对于视频开始的秒数
-- 识别出具体的应用程序名称和窗口标题
-- 描述用户的具体操作行为
+- app_name 和 window_title 请优先使用我提供的真实窗口信息，不要自己猜测
+- 描述用户的具体操作行为（在做什么、写什么、看什么）
 - 只返回 JSON，不要其他内容"""
 
 GENERATE_CARDS_SYSTEM_PROMPT = """你是一个时间管理助手。根据屏幕活动观察记录，生成时间轴活动卡片。
@@ -195,7 +199,8 @@ class DayflowBackendProvider:
         self,
         video_path: str,
         duration: float,
-        prompt: Optional[str] = None
+        prompt: Optional[str] = None,
+        window_records: Optional[List[Dict]] = None
     ) -> List[Observation]:
         """
         分析视频切片，获取观察记录
@@ -204,6 +209,7 @@ class DayflowBackendProvider:
             video_path: 视频文件路径
             duration: 视频时长（秒）
             prompt: 额外提示词（可选）
+            window_records: 窗口记录列表（可选）
             
         Returns:
             List[Observation]: 观察记录列表
@@ -218,11 +224,29 @@ class DayflowBackendProvider:
             logger.warning(f"无法从视频提取帧: {video_path}")
             return []
         
+        # 构建窗口信息文本
+        window_info_text = ""
+        if window_records:
+            window_info_text = "\n\n系统采集的真实窗口信息：\n"
+            # 按时间段聚合相同的应用
+            current_app = None
+            current_start = 0
+            for record in window_records:
+                app_name = record.get("app_name", "Unknown")
+                if app_name != current_app:
+                    if current_app:
+                        window_info_text += f"- [{current_start:.0f}s - {record['timestamp']:.0f}s] {current_app}\n"
+                    current_app = app_name
+                    current_start = record.get("timestamp", 0)
+            # 添加最后一个
+            if current_app:
+                window_info_text += f"- [{current_start:.0f}s - {duration:.0f}s] {current_app}\n"
+        
         # 构建消息内容（包含多张图片）
         content = []
         content.append({
             "type": "text",
-            "text": f"以下是一段 {duration:.0f} 秒屏幕录制的 {len(frames)} 个关键帧，请分析用户的活动。{prompt or ''}"
+            "text": f"以下是一段 {duration:.0f} 秒屏幕录制的 {len(frames)} 个关键帧，请分析用户的活动。{window_info_text}{prompt or ''}"
         })
         
         for i, frame_base64 in enumerate(frames):
@@ -241,10 +265,82 @@ class DayflowBackendProvider:
         
         try:
             response_text = await self._chat_completion(messages)
-            return self._parse_observations_from_text(response_text, duration)
+            observations = self._parse_observations_from_text(response_text, duration)
+            
+            # 后处理：用真实窗口信息覆盖 AI 返回的 app_name
+            if window_records and observations:
+                observations = self._apply_window_records(observations, window_records, duration)
+            
+            return observations
         except Exception as e:
             logger.error(f"视频分析失败: {e}")
             return []
+    
+    def _apply_window_records(
+        self, 
+        observations: List[Observation], 
+        window_records: List[Dict],
+        duration: float
+    ) -> List[Observation]:
+        """
+        用真实窗口记录覆盖 AI 返回的 app_name
+        
+        根据时间戳匹配，找到每个 observation 对应时间段内使用最多的应用
+        """
+        if not window_records:
+            return observations
+        
+        # 预处理：构建时间段到应用的映射
+        # 格式: [(start_ts, end_ts, app_name, window_title), ...]
+        time_segments = []
+        current_app = None
+        current_title = None
+        current_start = 0
+        
+        for record in window_records:
+            app_name = record.get("app_name", "Unknown")
+            window_title = record.get("window_title", "")
+            timestamp = record.get("timestamp", 0)
+            
+            if app_name != current_app:
+                if current_app:
+                    time_segments.append((current_start, timestamp, current_app, current_title))
+                current_app = app_name
+                current_title = window_title
+                current_start = timestamp
+        
+        # 添加最后一个时间段
+        if current_app:
+            time_segments.append((current_start, duration, current_app, current_title))
+        
+        # 为每个 observation 找到对应的应用
+        for obs in observations:
+            obs_start = obs.start_ts
+            obs_end = obs.end_ts
+            
+            # 统计这个时间段内各应用的占用时长
+            app_durations: Dict[str, float] = {}
+            app_titles: Dict[str, str] = {}
+            
+            for seg_start, seg_end, app_name, window_title in time_segments:
+                # 计算重叠时间
+                overlap_start = max(obs_start, seg_start)
+                overlap_end = min(obs_end, seg_end)
+                
+                if overlap_end > overlap_start:
+                    overlap_duration = overlap_end - overlap_start
+                    app_durations[app_name] = app_durations.get(app_name, 0) + overlap_duration
+                    if app_name not in app_titles:
+                        app_titles[app_name] = window_title
+            
+            # 找到占用时间最长的应用
+            if app_durations:
+                main_app = max(app_durations, key=app_durations.get)
+                obs.app_name = main_app
+                obs.window_title = app_titles.get(main_app, obs.window_title)
+                logger.debug(f"后处理: [{obs_start:.0f}s-{obs_end:.0f}s] app_name -> {main_app}")
+        
+        return observations
     
     async def generate_activity_cards(
         self,

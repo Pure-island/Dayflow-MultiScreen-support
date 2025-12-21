@@ -486,6 +486,12 @@ class SettingsPanel(QWidget):
         self.import_btn.clicked.connect(self._import_data)
         data_row.addWidget(self.import_btn)
         
+        self.dashboard_btn = QPushButton("📊 导出仪表盘")
+        self.dashboard_btn.setCursor(Qt.PointingHandCursor)
+        self.dashboard_btn.setFixedHeight(38)
+        self.dashboard_btn.clicked.connect(self._export_dashboard)
+        data_row.addWidget(self.dashboard_btn)
+        
         data_row.addStretch()
         data_layout.addLayout(data_row)
         
@@ -882,6 +888,7 @@ class SettingsPanel(QWidget):
         """
         self.export_btn.setStyleSheet(data_btn_style)
         self.import_btn.setStyleSheet(data_btn_style)
+        self.dashboard_btn.setStyleSheet(data_btn_style)
         
         # 邮件输入框样式
         email_input_style = f"""
@@ -1115,6 +1122,28 @@ class SettingsPanel(QWidget):
             self.theme_toggle.setText("🌙 暗色")
         else:
             self.theme_toggle.setText("☀️ 亮色")
+    
+    def _export_dashboard(self):
+        """导出仪表盘 HTML 报告"""
+        from ui.date_range_dialog import DateRangeDialog
+        from core.dashboard_exporter import DashboardExporter
+        
+        dialog = DateRangeDialog(self)
+        
+        def on_export(start_date, end_date):
+            try:
+                exporter = DashboardExporter(self.storage)
+                path = exporter.export_and_open(start_date, end_date)
+                QMessageBox.information(
+                    self, "导出成功", 
+                    f"仪表盘已导出并在浏览器中打开\n\n文件位置:\n{path}"
+                )
+            except Exception as e:
+                logger.error(f"导出仪表盘失败: {e}")
+                QMessageBox.critical(self, "导出失败", f"导出仪表盘时出错: {e}")
+        
+        dialog.range_selected.connect(on_export)
+        dialog.exec()
     
     def _export_data(self):
         """导出数据"""

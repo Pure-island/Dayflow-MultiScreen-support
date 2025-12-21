@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('database/schema.sql', 'database')]
+datas = [('database/schema.sql', 'database'), ('templates', 'templates')]
 binaries = []
 hiddenimports = ['PySide6.QtSvg', 'PySide6.QtSvgWidgets']
 tmp_ret = collect_all('dxcam')

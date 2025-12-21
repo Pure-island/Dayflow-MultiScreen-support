@@ -10,9 +10,13 @@ CREATE TABLE IF NOT EXISTS chunks (
     duration_seconds REAL NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',  -- pending, processing, completed, failed
     batch_id INTEGER,
+    window_records_path TEXT,  -- 窗口记录 JSON 文件路径
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (batch_id) REFERENCES analysis_batches(id)
 );
+
+-- 为已存在的数据库添加新字段（如果不存在）
+-- SQLite 不支持 IF NOT EXISTS 语法，所以用 ALTER TABLE 会在字段已存在时报错，但不影响使用
 
 -- 分析批次表
 CREATE TABLE IF NOT EXISTS analysis_batches (

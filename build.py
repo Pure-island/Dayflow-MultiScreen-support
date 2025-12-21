@@ -18,6 +18,7 @@ def build():
         "--clean",                     # 清理缓存
         "--icon=assets/icon.ico",      # 应用图标
         "--add-data=database/schema.sql;database",  # 包含数据库架构
+        "--add-data=templates;templates",           # 包含 HTML 模板
         
         # PySide6 6.8.1 通常只需要这些
         "--hidden-import=PySide6.QtSvg",

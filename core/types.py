@@ -162,6 +162,7 @@ class VideoChunk:
     duration_seconds: float = 0
     status: ChunkStatus = ChunkStatus.PENDING
     batch_id: Optional[int] = None
+    window_records_path: Optional[str] = None  # 窗口记录 JSON 文件路径
     
     def to_dict(self) -> dict:
         return {
@@ -171,7 +172,8 @@ class VideoChunk:
             "end_time": self.end_time.isoformat() if self.end_time else None,
             "duration_seconds": self.duration_seconds,
             "status": self.status.value,
-            "batch_id": self.batch_id
+            "batch_id": self.batch_id,
+            "window_records_path": self.window_records_path
         }
 
 
