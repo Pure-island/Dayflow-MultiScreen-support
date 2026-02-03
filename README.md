@@ -11,7 +11,7 @@
 
 *后台静默录屏 → AI 智能分析 → 可视化时间轴*
 
-[![Download](https://img.shields.io/badge/⬇️_下载安装包-EXE-brightgreen?style=for-the-badge)](https://github.com/SeiShonagon520/Dayflow/releases)
+[![Download](https://img.shields.io/badge/⬇️_下载安装包-EXE-brightgreen?style=for-the-badge)](https://github.com/Pure-island/Dayflow-MultiScreen-support/releases)
 
 **中文** | [English](README_EN.md)
 
@@ -305,7 +305,7 @@ Dayflow 支持自动检测和安装更新，让你始终使用最新版本：
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/SeiShonagon520/Dayflow.git
+git clone https://github.com/Pure-island/Dayflow-MultiScreen-support.git
 cd Dayflow
 
 # 2. 创建 Conda 环境（推荐）
@@ -540,11 +540,11 @@ Dayflow 高度重视用户隐私，采用多层保护机制确保数据安全：
 
 ## ⭐ Star 历史
 
-<a href="https://star-history.com/#SeiShonagon520/Dayflow&Date">
+<a href="https://star-history.com/#Pure-island/Dayflow-MultiScreen-support&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=SeiShonagon520/Dayflow&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=SeiShonagon520/Dayflow&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=SeiShonagon520/Dayflow&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Pure-island/Dayflow-MultiScreen-support&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Pure-island/Dayflow-MultiScreen-support&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Pure-island/Dayflow-MultiScreen-support&type=Date" />
  </picture>
 </a>
 

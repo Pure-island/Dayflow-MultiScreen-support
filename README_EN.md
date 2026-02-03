@@ -11,7 +11,7 @@
 
 *Silent Background Recording → AI Analysis → Visual Timeline*
 
-[![Download](https://img.shields.io/badge/⬇️_Download-EXE-brightgreen?style=for-the-badge)](https://github.com/SeiShonagon520/Dayflow/releases)
+[![Download](https://img.shields.io/badge/⬇️_Download-EXE-brightgreen?style=for-the-badge)](https://github.com/Pure-island/Dayflow-MultiScreen-support/releases)
 
 [中文](README.md) | **English**
 
@@ -305,7 +305,7 @@ Each card contains:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/SeiShonagon520/Dayflow.git
+git clone https://github.com/Pure-island/Dayflow-MultiScreen-support.git
 cd Dayflow
 
 # 2. Create Conda environment (recommended)
@@ -540,11 +540,11 @@ This project is licensed under **Creative Commons Attribution-NonCommercial-Shar
 
 ## ⭐ Star History
 
-<a href="https://star-history.com/#SeiShonagon520/Dayflow&Date">
+<a href="https://star-history.com/#Pure-island/Dayflow-MultiScreen-support&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=SeiShonagon520/Dayflow&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=SeiShonagon520/Dayflow&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=SeiShonagon520/Dayflow&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Pure-island/Dayflow-MultiScreen-support&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Pure-island/Dayflow-MultiScreen-support&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Pure-island/Dayflow-MultiScreen-support&type=Date" />
  </picture>
 </a>
 
