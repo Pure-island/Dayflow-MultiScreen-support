@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from datetime import datetime
@@ -38,6 +39,8 @@ TRANSCRIBE_SYSTEM_PROMPT = """你是屏幕活动分析助手。根据 OCR 文本
 - text 只描述行为（写什么代码、看什么内容、做什么操作），不要写应用名称
 - 参考窗口标题理解上下文（如文件名、网页标题、聊天对象）
 - 不要猜测或编造未出现的事件；没有证据时写"未能识别"
+- 必须返回非空的 JSON 内容
+- 如需思考过程，请极简
 - 只返回 JSON"""
 
 GENERATE_CARDS_SYSTEM_PROMPT = """你是时间管理助手。根据观察记录生成活动卡片。
@@ -79,6 +82,8 @@ productivity_score 评分标准：
 - start_ts/end_ts 为相对秒数（相对于本批次开始时间）
 - 必须覆盖完整时间范围 [0, duration]，不得留空洞；无法识别用"未识别"
 - 不得输出超出范围的时间戳
+- 必须返回非空的 JSON 内容
+ - 如需思考过程，请极简
 
 合并规则：连续相同应用且相似活动 → 合并为一张卡片
 拆分规则：同一时段内切换不同类型活动 → 拆分为多张卡片
@@ -115,10 +120,6 @@ class DayflowBackendProvider:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-
-    def _should_send_think(self) -> bool:
-        base = (self.api_base_url or "").lower()
-        return "localhost:11434" in base or "ollama" in base
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建异步 HTTP 客户端"""
@@ -214,6 +215,10 @@ class DayflowBackendProvider:
             "max_tokens": 4096,
         }
 
+        think_value = (config.LLM_THINK or "off").lower()
+        if think_value != "off":
+            request_body["think"] = True if think_value == "on" else think_value
+
         max_retries = max(0, int(getattr(config, "LLM_MAX_RETRIES", 2)))
         retry_delay = float(getattr(config, "LLM_RETRY_DELAY_SECONDS", 1.0))
         if retry_delay < 0:
@@ -245,6 +250,12 @@ class DayflowBackendProvider:
                         for item in content
                         if isinstance(item, dict)
                     )
+
+                if not content and isinstance(message, dict):
+                    reasoning = message.get("reasoning") or message.get("thinking")
+                    if reasoning:
+                        logger.info("API 返回空 content，使用 reasoning 字段")
+                        content = reasoning
 
                 if not content:
                     logger.warning(
@@ -440,14 +451,19 @@ class DayflowBackendProvider:
                     }
                 )
 
-        messages = [
-            {"role": "system", "content": TRANSCRIBE_SYSTEM_PROMPT},
-            {"role": "user", "content": content},
-        ]
-
         max_parse_retries = max(0, int(getattr(config, "LLM_PARSE_RETRIES", 2)))
         for attempt in range(max_parse_retries + 1):
             try:
+                request_content = content
+                if attempt > 0:
+                    retry_tag = f"\n重试标记: {attempt}/{max_parse_retries} {int(time.time() * 1000)}"
+                    request_content = content + [{"type": "text", "text": retry_tag}]
+
+                messages = [
+                    {"role": "system", "content": TRANSCRIBE_SYSTEM_PROMPT},
+                    {"role": "user", "content": request_content},
+                ]
+
                 response_text = await self._chat_completion(messages)
                 logger.info(
                     "视频分析响应: chars=%d preview=%s",
@@ -593,14 +609,21 @@ class DayflowBackendProvider:
         if prompt:
             obs_text += f"\n{prompt}"
 
-        messages = [
-            {"role": "system", "content": GENERATE_CARDS_SYSTEM_PROMPT},
-            {"role": "user", "content": obs_text},
-        ]
-
         max_parse_retries = max(0, int(getattr(config, "LLM_PARSE_RETRIES", 2)))
         for attempt in range(max_parse_retries + 1):
             try:
+                request_text = obs_text
+                if attempt > 0:
+                    request_text = (
+                        obs_text
+                        + f"\n重试标记: {attempt}/{max_parse_retries} {int(time.time() * 1000)}"
+                    )
+
+                messages = [
+                    {"role": "system", "content": GENERATE_CARDS_SYSTEM_PROMPT},
+                    {"role": "user", "content": request_text},
+                ]
+
                 response_text = await self._chat_completion(messages)
                 logger.info(
                     "卡片生成响应: chars=%d preview=%s",
@@ -696,88 +719,80 @@ class DayflowBackendProvider:
         cards = []
 
         try:
-            json_match = re.search(r"\{[\s\S]*\}", text)
-            if json_match:
-                json_text = self._sanitize_json_text(json_match.group())
-                data = json.loads(json_text)
-                items = []
-                if isinstance(data, dict):
-                    items = data.get("cards", [])
-                elif isinstance(data, list):
-                    items = data
-                if not items:
-                    logger.warning("卡片 JSON 为空: %s", text[:200])
+            items = self._extract_cards_items(text)
+            if not items:
+                logger.warning("卡片 JSON 为空: %s", text[:200])
 
-                for item in items:
-                    # 解析时间
-                    card_start = None
-                    card_end = None
-                    relative_start = None
-                    relative_end = None
+            for item in items:
+                # 解析时间
+                card_start = None
+                card_end = None
+                relative_start = None
+                relative_end = None
 
-                    if item.get("start_ts") is not None:
-                        try:
-                            relative_start = float(item.get("start_ts"))
-                        except Exception:
-                            relative_start = None
-                    if item.get("end_ts") is not None:
-                        try:
-                            relative_end = float(item.get("end_ts"))
-                        except Exception:
-                            relative_end = None
+                if item.get("start_ts") is not None:
+                    try:
+                        relative_start = float(item.get("start_ts") or 0)
+                    except Exception:
+                        relative_start = None
+                if item.get("end_ts") is not None:
+                    try:
+                        relative_end = float(item.get("end_ts") or 0)
+                    except Exception:
+                        relative_end = None
 
-                    if relative_start is None and item.get("start_time"):
-                        try:
-                            card_start = datetime.fromisoformat(
-                                item["start_time"].replace("Z", "+00:00")
-                            )
-                        except Exception:
-                            card_start = start_time
-
-                    if relative_end is None and item.get("end_time"):
-                        try:
-                            card_end = datetime.fromisoformat(
-                                item["end_time"].replace("Z", "+00:00")
-                            )
-                        except Exception:
-                            pass
-
-                    # 解析应用列表
-                    app_sites = []
-                    for app in item.get("app_sites", []):
-                        app_sites.append(
-                            AppSite(
-                                name=app.get("name", ""),
-                                duration_seconds=app.get("duration_seconds", 0),
-                            )
+                if relative_start is None and item.get("start_time"):
+                    try:
+                        card_start = datetime.fromisoformat(
+                            item["start_time"].replace("Z", "+00:00")
                         )
+                    except Exception:
+                        card_start = start_time
 
-                    # 解析分心记录
-                    distractions = []
-                    for dist in item.get("distractions", []):
-                        distractions.append(
-                            Distraction(
-                                description=dist.get("description", ""),
-                                timestamp=dist.get("timestamp", 0),
-                                duration_seconds=dist.get("duration_seconds", 0),
-                            )
+                if relative_end is None and item.get("end_time"):
+                    try:
+                        card_end = datetime.fromisoformat(
+                            item["end_time"].replace("Z", "+00:00")
                         )
+                    except Exception:
+                        pass
 
-                    card = ActivityCard(
-                        category=item.get("category", "其他"),
-                        title=item.get("title", "未命名活动"),
-                        summary=item.get("summary", ""),
-                        start_time=card_start,
-                        end_time=card_end,
-                        app_sites=app_sites,
-                        distractions=distractions,
-                        productivity_score=float(item.get("productivity_score", 0)),
+                # 解析应用列表
+                app_sites = []
+                for app in item.get("app_sites", []):
+                    app_sites.append(
+                        AppSite(
+                            name=app.get("name", ""),
+                            duration_seconds=app.get("duration_seconds", 0),
+                        )
                     )
-                    if relative_start is not None:
-                        setattr(card, "_relative_start", relative_start)
-                    if relative_end is not None:
-                        setattr(card, "_relative_end", relative_end)
-                    cards.append(card)
+
+                # 解析分心记录
+                distractions = []
+                for dist in item.get("distractions", []):
+                    distractions.append(
+                        Distraction(
+                            description=dist.get("description", ""),
+                            timestamp=dist.get("timestamp", 0),
+                            duration_seconds=dist.get("duration_seconds", 0),
+                        )
+                    )
+
+                card = ActivityCard(
+                    category=item.get("category", "其他"),
+                    title=item.get("title", "未命名活动"),
+                    summary=item.get("summary", ""),
+                    start_time=card_start,
+                    end_time=card_end,
+                    app_sites=app_sites,
+                    distractions=distractions,
+                    productivity_score=float(item.get("productivity_score") or 0),
+                )
+                if relative_start is not None:
+                    setattr(card, "_relative_start", relative_start)
+                if relative_end is not None:
+                    setattr(card, "_relative_end", relative_end)
+                cards.append(card)
 
         except json.JSONDecodeError as e:
             logger.warning(f"卡片 JSON 解析失败: {e}")
@@ -790,6 +805,53 @@ class DayflowBackendProvider:
             return cards, False
 
         return cards, True
+
+    def _extract_cards_items(self, text: str) -> List[Dict]:
+        stripped = text.strip()
+        candidates = []
+
+        if stripped.startswith("[") or stripped.startswith("{"):
+            candidates.append(stripped)
+
+        array_match = re.search(r"\[[\s\S]*\]", text)
+        if array_match:
+            candidates.append(array_match.group())
+
+        obj_match = re.search(r"\{[\s\S]*\}", text)
+        if obj_match:
+            candidates.append(obj_match.group())
+
+        for raw in candidates:
+            try:
+                data = json.loads(self._sanitize_json_text(raw))
+            except Exception:
+                data = None
+
+            if data is None:
+                trimmed = self._trim_incomplete_json(raw)
+                if trimmed:
+                    try:
+                        data = json.loads(self._sanitize_json_text(trimmed))
+                    except Exception:
+                        data = None
+            if data is None:
+                continue
+            if isinstance(data, dict):
+                items = data.get("cards", [])
+                if isinstance(items, list):
+                    return items
+            if isinstance(data, list):
+                return data
+
+        return []
+
+    def _trim_incomplete_json(self, text: str) -> Optional[str]:
+        last_obj = text.rfind("}")
+        last_arr = text.rfind("]")
+        end = max(last_obj, last_arr)
+        if end == -1:
+            return None
+        return text[: end + 1]
 
     def _sanitize_json_text(self, text: str) -> str:
         """清理 JSON 中未转义的控制字符"""

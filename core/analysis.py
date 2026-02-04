@@ -209,7 +209,15 @@ class AnalysisScheduler:
             end = max(0.0, min(obs.end_ts, duration))
             if end <= start:
                 continue
-            normalized.append(Observation(start_ts=start, end_ts=end, text=obs.text))
+            normalized.append(
+                Observation(
+                    start_ts=start,
+                    end_ts=end,
+                    text=obs.text,
+                    app_name=obs.app_name,
+                    window_title=obs.window_title,
+                )
+            )
 
         if not normalized:
             return [Observation(start_ts=0, end_ts=duration, text="未能识别")]

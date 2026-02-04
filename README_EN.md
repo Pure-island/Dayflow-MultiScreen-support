@@ -70,7 +70,7 @@
 | 📥 **CSV Export** | One-click export activity data to CSV for analysis |
 | ⏸️ **Pause Recording** | Pause when handling private content, resume when done |
 | 🎨 **Theme Switching** | IDE-style dark/light themes with auto-saved preferences |
-| ⚙️ **Configurable Settings** | Customize email times, idle pause threshold, API timeout, and more |
+| ⚙️ **Configurable Settings** | Customize email times, idle pause threshold, API timeout, retries, and more |
 | 📦 **EXE Packaging** | Build standalone executable, no Python required |
 
 ### 📋 Changelog
@@ -347,7 +347,9 @@ After building, the `dist/Dayflow/` folder can be copied and shared directly.
    - **API Key**: Your API key
    - **Model**: Any model for OCR+LLM, vision-capable for VLM
    - **Analysis Mode**: OCR+LLM (recommended) / VLM (images)
+   - **Thinking (Ollama)**: off/on/low/medium/high
    - **Idle Pause**: Auto pause when no input for the threshold
+   - **Retries**: Auto retry on parse failure or empty result
 3. Click **Test Connection** to verify
 4. Click **Save Config**
 
