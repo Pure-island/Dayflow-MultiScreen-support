@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QScrollArea,
     QProgressBar,
+    QComboBox,
+    QSpinBox,
 )
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
@@ -562,7 +564,7 @@ class SettingsPanel(QWidget):
         api_layout.addWidget(self.api_key_input)
 
         # 模型名称输入框
-        model_label = QLabel("模型名称（需支持视觉）")
+        model_label = QLabel("模型名称（VLM 需支持视觉）")
         model_label.setObjectName("cardDesc")
         self._descs.append(model_label)
         api_layout.addWidget(model_label)
@@ -571,6 +573,32 @@ class SettingsPanel(QWidget):
         self.api_model_input.setPlaceholderText("gpt-4o / qwen-vl-plus / deepseek-chat")
         self.api_model_input.setMinimumHeight(40)
         api_layout.addWidget(self.api_model_input)
+
+        # 分析模式
+        mode_label = QLabel("分析模式")
+        mode_label.setObjectName("cardDesc")
+        self._descs.append(mode_label)
+        api_layout.addWidget(mode_label)
+
+        self.analysis_mode_combo = QComboBox()
+        self.analysis_mode_combo.addItem("OCR+LLM（推荐）", "ocr")
+        self.analysis_mode_combo.addItem("VLM（图像）", "vlm")
+        self.analysis_mode_combo.setMinimumHeight(40)
+        api_layout.addWidget(self.analysis_mode_combo)
+
+        think_label = QLabel("Thinking 模式（Ollama）")
+        think_label.setObjectName("cardDesc")
+        self._descs.append(think_label)
+        api_layout.addWidget(think_label)
+
+        self.think_mode_combo = QComboBox()
+        self.think_mode_combo.addItem("关闭", "off")
+        self.think_mode_combo.addItem("开启", "on")
+        self.think_mode_combo.addItem("低", "low")
+        self.think_mode_combo.addItem("中", "medium")
+        self.think_mode_combo.addItem("高", "high")
+        self.think_mode_combo.setMinimumHeight(40)
+        api_layout.addWidget(self.think_mode_combo)
 
         # 按钮行
         key_row = QHBoxLayout()
@@ -637,12 +665,27 @@ class SettingsPanel(QWidget):
         record_layout.setSpacing(10)
 
         self._create_title("🎬 录制", record_layout)
-        record_desc = QLabel(
+        self.record_desc = QLabel(
             f"帧率: {config.RECORD_FPS} FPS | 切片: {config.CHUNK_DURATION_SECONDS}秒"
         )
-        record_desc.setObjectName("cardDesc")
-        self._descs.append(record_desc)
-        record_layout.addWidget(record_desc)
+        self.record_desc.setObjectName("cardDesc")
+        self._descs.append(self.record_desc)
+        record_layout.addWidget(self.record_desc)
+
+        idle_row = QHBoxLayout()
+        idle_label = QLabel("空闲暂停(分钟)")
+        idle_label.setObjectName("cardDesc")
+        self._descs.append(idle_label)
+        idle_row.addWidget(idle_label)
+        idle_row.addStretch()
+
+        self.idle_threshold_spin = QSpinBox()
+        self.idle_threshold_spin.setRange(1, 180)
+        self.idle_threshold_spin.setFixedSize(90, 32)
+        self.idle_threshold_spin.valueChanged.connect(self._on_idle_threshold_changed)
+        idle_row.addWidget(self.idle_threshold_spin)
+
+        record_layout.addLayout(idle_row)
 
         settings_row.addWidget(record_frame)
         layout.addLayout(settings_row)
@@ -1008,6 +1051,28 @@ class SettingsPanel(QWidget):
         self.api_key_input.setStyleSheet(api_input_style)
         self.api_model_input.setStyleSheet(api_input_style)
 
+        api_select_style = f"""
+            QComboBox {{
+                background-color: {t.bg_tertiary};
+                border: 1px solid {t.border};
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 14px;
+                color: {t.text_primary};
+                font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+            }}
+            QComboBox:focus {{
+                border-color: {t.accent};
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {t.bg_secondary};
+                color: {t.text_primary};
+                selection-background-color: {t.accent};
+            }}
+        """
+        self.analysis_mode_combo.setStyleSheet(api_select_style)
+        self.think_mode_combo.setStyleSheet(api_select_style)
+
         # 主要按钮（保存）
         self.save_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1173,10 +1238,20 @@ class SettingsPanel(QWidget):
         api_url = self.storage.get_setting("api_url", config.API_BASE_URL)
         api_key = self.storage.get_setting("api_key", "")
         api_model = self.storage.get_setting("api_model", config.API_MODEL)
+        analysis_mode = self.storage.get_setting("analysis_mode", config.ANALYSIS_MODE)
+        think_mode = self.storage.get_setting("think_mode", config.LLM_THINK)
 
         self.api_url_input.setText(api_url)
         self.api_key_input.setText(api_key)
         self.api_model_input.setText(api_model)
+        mode_index = self.analysis_mode_combo.findData(analysis_mode)
+        if mode_index < 0:
+            mode_index = 0
+        self.analysis_mode_combo.setCurrentIndex(mode_index)
+        think_index = self.think_mode_combo.findData(think_mode)
+        if think_index < 0:
+            think_index = 0
+        self.think_mode_combo.setCurrentIndex(think_index)
 
         # 加载主题设置
         theme = self.storage.get_setting("theme", "dark")
@@ -1196,23 +1271,48 @@ class SettingsPanel(QWidget):
         send_times = self.storage.get_setting("email_send_times", "12:00,22:00")
         self.email_send_times_input.setText(send_times)
 
+        idle_seconds = self.storage.get_setting(
+            "idle_threshold_seconds", str(config.IDLE_THRESHOLD_SECONDS)
+        )
+        try:
+            idle_minutes = max(1, int(int(idle_seconds) / 60))
+        except ValueError:
+            idle_minutes = max(1, int(config.IDLE_THRESHOLD_SECONDS / 60))
+        self.idle_threshold_spin.blockSignals(True)
+        self.idle_threshold_spin.setValue(idle_minutes)
+        self.idle_threshold_spin.blockSignals(False)
+
     def _save_api_config(self):
         """保存 API 配置"""
         api_url = self.api_url_input.text().strip() or config.API_BASE_URL
         api_key = self.api_key_input.text().strip()
         api_model = self.api_model_input.text().strip() or config.API_MODEL
+        analysis_mode = self.analysis_mode_combo.currentData() or config.ANALYSIS_MODE
+        think_mode = self.think_mode_combo.currentData() or config.LLM_THINK
 
         self.storage.set_setting("api_url", api_url)
         self.storage.set_setting("api_key", api_key)
         self.storage.set_setting("api_model", api_model)
+        self.storage.set_setting("analysis_mode", analysis_mode)
+        self.storage.set_setting("think_mode", think_mode)
 
         # 更新运行时配置
         config.API_BASE_URL = api_url
         config.API_KEY = api_key
         config.API_MODEL = api_model
+        config.ANALYSIS_MODE = analysis_mode
+        config.LLM_THINK = think_mode
 
         self.api_key_saved.emit(api_key)
         QMessageBox.information(self, "成功", "API 配置已保存")
+
+    def _on_idle_threshold_changed(self, minutes: int):
+        seconds = int(minutes) * 60
+        self.storage.set_setting("idle_threshold_seconds", str(seconds))
+        config.IDLE_THRESHOLD_SECONDS = seconds
+        self.record_desc.setText(
+            f"帧率: {config.RECORD_FPS} FPS | 切片: {config.CHUNK_DURATION_SECONDS}秒"
+        )
 
     def _test_connection(self):
         """测试 API 连接"""
@@ -2171,6 +2271,8 @@ class MainWindow(QMainWindow):
         api_url = self.storage.get_setting("api_url", "")
         api_key = self.storage.get_setting("api_key", "")
         api_model = self.storage.get_setting("api_model", "")
+        analysis_mode = self.storage.get_setting("analysis_mode", config.ANALYSIS_MODE)
+        think_mode = self.storage.get_setting("think_mode", config.LLM_THINK)
 
         if api_url:
             config.API_BASE_URL = api_url
@@ -2178,6 +2280,10 @@ class MainWindow(QMainWindow):
             config.API_KEY = api_key
         if api_model:
             config.API_MODEL = api_model
+        if analysis_mode:
+            config.ANALYSIS_MODE = analysis_mode
+        if think_mode:
+            config.LLM_THINK = think_mode
 
         # 加载今日时间轴
         self._refresh_timeline()

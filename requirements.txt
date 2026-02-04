@@ -11,6 +11,10 @@ dxcam>=0.0.5
 ffmpeg-python>=0.2.0
 opencv-python>=4.8.0
 
+# OCR
+rapidocr-onnxruntime>=1.3.2
+onnxruntime-gpu>=1.16.0
+
 # HTTP Client (async, HTTP/2 support)
 httpx[http2]>=0.25.0
 

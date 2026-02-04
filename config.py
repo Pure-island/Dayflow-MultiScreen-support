@@ -15,8 +15,8 @@ API_KEY = os.getenv("DAYFLOW_API_KEY", "")
 API_MODEL = os.getenv("DAYFLOW_API_MODEL", "qwen3-vl-plus")  # 支持视觉输入的模型
 
 # 录屏配置
-RECORD_FPS = 1  # 每秒1帧
-CHUNK_DURATION_SECONDS = 60  # 每60秒一个切片
+RECORD_FPS = 0.1  # 每秒1帧
+CHUNK_DURATION_SECONDS = 300  # 每60秒一个切片
 VIDEO_BITRATE = "500k"  # 低码率
 VIDEO_CODEC = "libx264"
 MAX_CANVAS_WIDTH = 2560  # 多屏合成画布最大宽度（等比缩放）
@@ -24,7 +24,16 @@ MAX_OUTPUT_PROBE = 8  # 最大探测屏幕数量，避免异常值导致大量�
 
 # 分析配置
 BATCH_DURATION_MINUTES = 15  # 批次时长约15分钟
-ANALYSIS_INTERVAL_SECONDS = 60  # 每分钟扫描一次
+ANALYSIS_INTERVAL_SECONDS = 600  # 每分钟扫描一次
+LLM_TIMEOUT_SECONDS = 300
+ANALYSIS_MODE = "ocr"  # ocr 或 vlm
+LLM_MAX_RETRIES = 2
+LLM_RETRY_DELAY_SECONDS = 1.0
+PROCESSING_RESET_MINUTES = 0  # 0 表示启动时重置所有 processing 切片
+OCR_DEVICE = "gpu"  # gpu 或 cpu
+LLM_PARSE_RETRIES = 2
+IDLE_THRESHOLD_SECONDS = 300  # 无键鼠输入超过该秒数则暂停录制
+LLM_THINK = "off"  # off/on/low/medium/high
 
 # 存储清理配置
 AUTO_DELETE_ANALYZED_CHUNKS = True  # 分析完成后自动删除视频切片（节省磁盘空间）

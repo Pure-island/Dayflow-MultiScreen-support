@@ -9,7 +9,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from datetime import datetime
 
 import httpx
@@ -17,23 +17,27 @@ import cv2
 
 import config
 from core.types import Observation, ActivityCard, AppSite, Distraction
+from core.ocr import get_ocr_engine
 
 logger = logging.getLogger(__name__)
 
 # 系统提示词
-TRANSCRIBE_SYSTEM_PROMPT = """你是屏幕活动分析助手。根据截图和窗口信息，描述用户的具体行为。
+TRANSCRIBE_SYSTEM_PROMPT = """你是屏幕活动分析助手。根据 OCR 文本和窗口信息，描述用户的具体行为。
 
 返回 JSON 格式：
 {
   "observations": [
-    {"start_ts": 0, "end_ts": 10, "text": "编写 Python 代码，实现用户登录功能"}
+    {"start_ts": xxx, "end_ts": xxx, "text": "干了什么"}
   ]
 }
 
 规则：
 - start_ts/end_ts 是相对秒数
+- 必须覆盖完整时间范围 [0, duration]，不得留空洞；无法识别用"未能识别"
+- 不得输出超出范围的时间戳
 - text 只描述行为（写什么代码、看什么内容、做什么操作），不要写应用名称
 - 参考窗口标题理解上下文（如文件名、网页标题、聊天对象）
+- 不要猜测或编造未出现的事件；没有证据时写"未能识别"
 - 只返回 JSON"""
 
 GENERATE_CARDS_SYSTEM_PROMPT = """你是时间管理助手。根据观察记录生成活动卡片。
@@ -45,8 +49,8 @@ JSON 格式：
       "category": "编程",
       "title": "Dayflow 项目开发",
       "summary": "实现用户登录功能，编写单元测试",
-      "start_time": "2024-01-01T10:00:00",
-      "end_time": "2024-01-01T11:30:00",
+      "start_ts": 0,
+      "end_ts": 900,
       "app_sites": [{"name": "VS Code", "duration_seconds": 5400}],
       "distractions": [],
       "productivity_score": 85
@@ -71,12 +75,15 @@ productivity_score 评分标准：
 - 30-49：轻度娱乐（浏览、社交）
 - 0-29：纯娱乐（游戏、视频）
 
+时间规则：
+- start_ts/end_ts 为相对秒数（相对于本批次开始时间）
+- 必须覆盖完整时间范围 [0, duration]，不得留空洞；无法识别用"未识别"
+- 不得输出超出范围的时间戳
+
 合并规则：连续相同应用且相似活动 → 合并为一张卡片
 拆分规则：同一时段内切换不同类型活动 → 拆分为多张卡片
 
-跨批次连续性：
-- 如果"前序活动卡片"的最后一张与当前观察记录的开头是同类活动，考虑延续而非新建
-- 检查前序卡片的 category 和 title，如果当前活动是其延续，在 title 中体现连续性
+覆盖规则：必须覆盖完整时间范围。若存在无法识别的时间段，输出对应卡片，title 统一为 "未识别"。
 
 只返回 JSON"""
 
@@ -92,7 +99,7 @@ class DayflowBackendProvider:
         api_base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: float = 120.0,
+        timeout: float = config.LLM_TIMEOUT_SECONDS,
     ):
         self.api_base_url = (api_base_url or config.API_BASE_URL).rstrip("/")
         self.api_key = api_key or config.API_KEY
@@ -109,6 +116,10 @@ class DayflowBackendProvider:
             "Content-Type": "application/json",
         }
 
+    def _should_send_think(self) -> bool:
+        base = (self.api_base_url or "").lower()
+        return "localhost:11434" in base or "ollama" in base
+
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建异步 HTTP 客户端"""
         if self._client is None or self._client.is_closed:
@@ -124,29 +135,30 @@ class DayflowBackendProvider:
             self._client = None
 
     def _extract_frames_from_video(
-        self, video_path: str, max_frames: int = 10
-    ) -> List[str]:
+        self, video_path: str, max_frames: int = 8
+    ) -> Tuple[List[Tuple[int, "cv2.Mat"]], int]:
         """
-        从视频中提取关键帧并编码为 base64
+        从视频中提取关键帧
 
         Args:
             video_path: 视频文件路径
             max_frames: 最大提取帧数
 
         Returns:
-            List[str]: base64 编码的图片列表
+            frames_with_index: [(frame_index, frame)]
+            total_frames: 视频总帧数
         """
-        frames_base64 = []
+        frames_with_index = []
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             logger.error(f"无法打开视频文件: {video_path}")
-            return frames_base64
+            return frames_with_index, 0
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if total_frames == 0:
             cap.release()
-            return frames_base64
+            return frames_with_index, 0
 
         # 均匀采样帧
         frame_indices = [int(i * total_frames / max_frames) for i in range(max_frames)]
@@ -157,13 +169,27 @@ class DayflowBackendProvider:
             if not ret:
                 continue
 
-            # 压缩图片以减少传输大小
-            frame = cv2.resize(frame, (1280, 720))
-            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            base64_image = base64.b64encode(buffer).decode("utf-8")
-            frames_base64.append(base64_image)
+            frames_with_index.append((idx, frame))
 
         cap.release()
+        return frames_with_index, total_frames
+
+    def _encode_frames_to_base64(self, frames: List) -> List[str]:
+        frames_base64 = []
+        for frame in frames:
+            max_w = 768
+            max_h = 432
+            height, width = frame.shape[:2]
+            scale = min(max_w / width, max_h / height, 1.0)
+            if scale < 1.0:
+                frame = cv2.resize(
+                    frame,
+                    (int(width * scale), int(height * scale)),
+                    interpolation=cv2.INTER_AREA,
+                )
+            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+            base64_image = base64.b64encode(buffer).decode("utf-8")
+            frames_base64.append(base64_image)
         return frames_base64
 
     async def _chat_completion(
@@ -188,21 +214,74 @@ class DayflowBackendProvider:
             "max_tokens": 4096,
         }
 
-        try:
-            response = await client.post(
-                f"{self.api_base_url}/chat/completions", json=request_body
-            )
-            response.raise_for_status()
+        max_retries = max(0, int(getattr(config, "LLM_MAX_RETRIES", 2)))
+        retry_delay = float(getattr(config, "LLM_RETRY_DELAY_SECONDS", 1.0))
+        if retry_delay < 0:
+            retry_delay = 0.0
+        for attempt in range(max_retries + 1):
+            try:
+                response = await client.post(
+                    f"{self.api_base_url}/chat/completions", json=request_body
+                )
+                response.raise_for_status()
 
-            result = response.json()
-            return result["choices"][0]["message"]["content"]
+                result = response.json()
+                if isinstance(result, dict) and result.get("error"):
+                    logger.error(f"API 返回错误: {result.get('error')}")
+                    raise ValueError("API response contains error")
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"API 请求失败: {e.response.status_code} - {e.response.text}")
-            raise
-        except Exception as e:
-            logger.error(f"API 请求异常: {e}")
-            raise
+                choices = result.get("choices") if isinstance(result, dict) else None
+                if not choices:
+                    logger.error(f"API 响应缺少 choices: {response.text[:500]}")
+                    raise ValueError("API response missing choices")
+
+                message = (
+                    choices[0].get("message") if isinstance(choices[0], dict) else None
+                )
+                content = message.get("content") if isinstance(message, dict) else None
+                if isinstance(content, list):
+                    content = "".join(
+                        item.get("text", "")
+                        for item in content
+                        if isinstance(item, dict)
+                    )
+
+                if not content:
+                    logger.warning(
+                        "API 返回空内容: model=%s response=%s",
+                        self.model,
+                        response.text[:500],
+                    )
+                    return ""
+
+                return content
+
+            except httpx.RequestError as e:
+                request_url = getattr(e.request, "url", "unknown")
+                if attempt < max_retries:
+                    logger.warning(
+                        "API 请求异常重试(%d/%d): %s %r - %s",
+                        attempt + 1,
+                        max_retries,
+                        type(e).__name__,
+                        e,
+                        request_url,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                logger.error(f"API 请求异常: {type(e).__name__} {e!r} - {request_url}")
+                raise
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    f"API 请求失败: {e.response.status_code} - {e.response.text}"
+                )
+                raise
+            except Exception as e:
+                logger.error(f"API 请求异常: {type(e).__name__} {e!r}")
+                raise
+
+        raise RuntimeError("API 请求失败，已耗尽重试次数")
 
     async def transcribe_video(
         self,
@@ -229,8 +308,10 @@ class DayflowBackendProvider:
             raise FileNotFoundError(f"视频文件不存在: {video_path}")
 
         # 提取视频帧
-        frames = self._extract_frames_from_video(video_path, max_frames=8)
-        if not frames:
+        frames_with_index, total_frames = self._extract_frames_from_video(
+            video_path, max_frames=8
+        )
+        if not frames_with_index:
             logger.warning(f"无法从视频提取帧: {video_path}")
             return []
 
@@ -302,45 +383,104 @@ class DayflowBackendProvider:
 
         window_info_text = layout_text + window_text
 
-        # 构建消息内容（包含多张图片）
-        content = []
-        content.append(
-            {
-                "type": "text",
-                "text": f"以下是一段 {duration:.0f} 秒屏幕录制的 {len(frames)} 个关键帧，请分析用户的活动。{window_info_text}{prompt or ''}",
-            }
-        )
+        analysis_mode = (config.ANALYSIS_MODE or "ocr").lower()
 
-        for i, frame_base64 in enumerate(frames):
+        # 构建消息内容
+        content = []
+        if analysis_mode == "ocr":
+            ocr_engine = get_ocr_engine()
+            frames = [frame for _, frame in frames_with_index]
+            ocr_texts = ocr_engine.ocr_frames(frames)
+            ocr_lines = []
+            total_frames_safe = max(total_frames - 1, 1)
+            for (frame_idx, _frame), text in zip(frames_with_index, ocr_texts):
+                text = text.strip()
+                if not text:
+                    continue
+                timestamp = duration * (frame_idx / total_frames_safe)
+                ocr_lines.append(f"[{timestamp:.0f}s] {text}")
+            ocr_text = "\n".join(ocr_lines)
+            logger.info(
+                "OCR 提取完成: frames=%d chars=%d",
+                len(frames_with_index),
+                len(ocr_text),
+            )
             content.append(
                 {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{frame_base64}",
-                        "detail": "low",
-                    },
+                    "type": "text",
+                    "text": (
+                        f"以下是一段 {duration:.0f} 秒屏幕录制的 OCR 文本与窗口信息，请分析用户的活动。"
+                        f"时间范围为 [0, {duration:.0f}] 秒，必须完整覆盖。"
+                        f"\n\nOCR 文本：\n{ocr_text}\n{window_info_text}{prompt or ''}"
+                    ),
                 }
             )
+        else:
+            frames = [frame for _, frame in frames_with_index]
+            frames_base64 = self._encode_frames_to_base64(frames)
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"以下是一段 {duration:.0f} 秒屏幕录制的 {len(frames_base64)} 个关键帧，请分析用户的活动。"
+                        f"时间范围为 [0, {duration:.0f}] 秒，必须完整覆盖。"
+                        f"{window_info_text}{prompt or ''}"
+                    ),
+                }
+            )
+
+            for frame_base64 in frames_base64:
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{frame_base64}",
+                            "detail": "low",
+                        },
+                    }
+                )
 
         messages = [
             {"role": "system", "content": TRANSCRIBE_SYSTEM_PROMPT},
             {"role": "user", "content": content},
         ]
 
-        try:
-            response_text = await self._chat_completion(messages)
-            observations = self._parse_observations_from_text(response_text, duration)
-
-            # 后处理：用真实窗口信息覆盖 AI 返回的 app_name
-            if window_records and observations:
-                observations = self._apply_window_records(
-                    observations, window_records, duration
+        max_parse_retries = max(0, int(getattr(config, "LLM_PARSE_RETRIES", 2)))
+        for attempt in range(max_parse_retries + 1):
+            try:
+                response_text = await self._chat_completion(messages)
+                logger.info(
+                    "视频分析响应: chars=%d preview=%s",
+                    len(response_text),
+                    response_text,
                 )
+                observations, parsed = self._parse_observations_from_text(
+                    response_text, duration
+                )
+                logger.info("视频分析解析: observations=%d", len(observations))
 
-            return observations
-        except Exception as e:
-            logger.error(f"视频分析失败: {e}")
-            return []
+                if (
+                    not parsed or len(observations) == 0
+                ) and attempt < max_parse_retries:
+                    logger.warning(
+                        "视频分析解析失败，正在重试 LLM 请求(%d/%d)",
+                        attempt + 1,
+                        max_parse_retries,
+                    )
+                    continue
+
+                # 后处理：用真实窗口信息覆盖 AI 返回的 app_name
+                if window_records and observations:
+                    observations = self._apply_window_records(
+                        observations, window_records, duration
+                    )
+
+                return observations
+            except Exception as e:
+                logger.error(f"视频分析失败: {e}")
+                return []
+
+        return []
 
     def _apply_window_records(
         self,
@@ -448,11 +588,7 @@ class DayflowBackendProvider:
         if start_time:
             obs_text += f"\n录制开始时间: {start_time.isoformat()}"
 
-        # 添加前序卡片上下文
-        if context_cards:
-            obs_text += "\n\n前序活动卡片：\n"
-            for card in context_cards[-3:]:  # 只取最近3个
-                obs_text += f"- {card.category}: {card.title}\n"
+        obs_text += "\n必须覆盖完整时间范围 [0, duration]，不得留空洞。"
 
         if prompt:
             obs_text += f"\n{prompt}"
@@ -462,77 +598,148 @@ class DayflowBackendProvider:
             {"role": "user", "content": obs_text},
         ]
 
-        try:
-            response_text = await self._chat_completion(messages)
-            return self._parse_cards_from_text(response_text, start_time)
-        except Exception as e:
-            logger.error(f"卡片生成失败: {e}")
-            return []
+        max_parse_retries = max(0, int(getattr(config, "LLM_PARSE_RETRIES", 2)))
+        for attempt in range(max_parse_retries + 1):
+            try:
+                response_text = await self._chat_completion(messages)
+                logger.info(
+                    "卡片生成响应: chars=%d preview=%s",
+                    len(response_text),
+                    response_text,
+                )
+                cards, parsed = self._parse_cards_from_text(response_text, start_time)
+                logger.info("卡片生成解析: cards=%d", len(cards))
+                if parsed and len(cards) > 0:
+                    return cards
+                if attempt < max_parse_retries:
+                    logger.warning(
+                        "卡片解析失败，正在重试 LLM 请求(%d/%d)",
+                        attempt + 1,
+                        max_parse_retries,
+                    )
+                    continue
+                return []
+            except Exception as e:
+                logger.error(f"卡片生成失败: {e}")
+                return []
+
+        return []
 
     def _parse_observations_from_text(
         self, text: str, duration: float
-    ) -> List[Observation]:
+    ) -> Tuple[List[Observation], bool]:
         """从文本响应中解析观察记录"""
         observations = []
 
         try:
-            # 尝试提取 JSON
-            json_match = re.search(r"\{[\s\S]*\}", text)
-            if json_match:
-                data = json.loads(json_match.group())
-                items = data.get("observations", [])
-
-                for item in items:
-                    obs = Observation(
-                        start_ts=float(item.get("start_ts", 0)),
-                        end_ts=float(item.get("end_ts", duration)),
-                        text=item.get("text", ""),
-                        app_name=item.get("app_name"),
-                        window_title=item.get("window_title"),
-                    )
-                    observations.append(obs)
+            stripped = text.strip()
+            if stripped.startswith("[") or stripped.startswith("{"):
+                data = json.loads(self._sanitize_json_text(stripped))
+                if isinstance(data, dict):
+                    items = data.get("observations", [])
+                    observations.extend(self._build_observations(items, duration))
+                elif isinstance(data, list):
+                    observations.extend(self._build_observations(data, duration))
+            else:
+                array_match = re.search(r"\[[\s\S]*\]", text)
+                if array_match:
+                    data = json.loads(self._sanitize_json_text(array_match.group()))
+                    if isinstance(data, list):
+                        observations.extend(self._build_observations(data, duration))
+                else:
+                    json_match = re.search(r"\{[\s\S]*\}", text)
+                    if json_match:
+                        data = json.loads(self._sanitize_json_text(json_match.group()))
+                        if isinstance(data, dict):
+                            items = data.get("observations", [])
+                            observations.extend(
+                                self._build_observations(items, duration)
+                            )
         except json.JSONDecodeError as e:
             logger.warning(f"JSON 解析失败: {e}, 原文: {text[:200]}")
             # 如果 JSON 解析失败，创建一个基于整段文本的观察记录
             observations.append(
                 Observation(start_ts=0, end_ts=duration, text=text[:500])
             )
+            return observations, False
+        except Exception as e:
+            logger.warning(f"解析观察记录失败: {type(e).__name__} {e!r}")
+            return observations, False
 
-        return observations
+        if not observations:
+            return observations, False
+
+        return observations, True
+
+    def _build_observations(
+        self, items: List[Dict], duration: float
+    ) -> List[Observation]:
+        results = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            results.append(
+                Observation(
+                    start_ts=float(item.get("start_ts", 0)),
+                    end_ts=float(item.get("end_ts", duration)),
+                    text=item.get("text", ""),
+                    app_name=item.get("app_name"),
+                    window_title=item.get("window_title"),
+                )
+            )
+        return results
 
     def _parse_cards_from_text(
         self, text: str, start_time: Optional[datetime]
-    ) -> List[ActivityCard]:
+    ) -> Tuple[List[ActivityCard], bool]:
         """从文本响应中解析活动卡片"""
         cards = []
 
         try:
             json_match = re.search(r"\{[\s\S]*\}", text)
             if json_match:
-                data = json.loads(json_match.group())
-                items = data.get("cards", [])
+                json_text = self._sanitize_json_text(json_match.group())
+                data = json.loads(json_text)
+                items = []
+                if isinstance(data, dict):
+                    items = data.get("cards", [])
+                elif isinstance(data, list):
+                    items = data
+                if not items:
+                    logger.warning("卡片 JSON 为空: %s", text[:200])
 
                 for item in items:
                     # 解析时间
                     card_start = None
                     card_end = None
+                    relative_start = None
+                    relative_end = None
 
-                    if item.get("start_time"):
+                    if item.get("start_ts") is not None:
+                        try:
+                            relative_start = float(item.get("start_ts"))
+                        except Exception:
+                            relative_start = None
+                    if item.get("end_ts") is not None:
+                        try:
+                            relative_end = float(item.get("end_ts"))
+                        except Exception:
+                            relative_end = None
+
+                    if relative_start is None and item.get("start_time"):
                         try:
                             card_start = datetime.fromisoformat(
                                 item["start_time"].replace("Z", "+00:00")
                             )
-                        except:
+                        except Exception:
                             card_start = start_time
-                    else:
-                        card_start = start_time
 
-                    if item.get("end_time"):
+                    if relative_end is None and item.get("end_time"):
                         try:
                             card_end = datetime.fromisoformat(
                                 item["end_time"].replace("Z", "+00:00")
                             )
-                        except:
+                        except Exception:
                             pass
 
                     # 解析应用列表
@@ -566,12 +773,60 @@ class DayflowBackendProvider:
                         distractions=distractions,
                         productivity_score=float(item.get("productivity_score", 0)),
                     )
+                    if relative_start is not None:
+                        setattr(card, "_relative_start", relative_start)
+                    if relative_end is not None:
+                        setattr(card, "_relative_end", relative_end)
                     cards.append(card)
 
         except json.JSONDecodeError as e:
             logger.warning(f"卡片 JSON 解析失败: {e}")
+            return [], False
+        except Exception as e:
+            logger.warning(f"解析卡片失败: {type(e).__name__} {e!r}")
+            return [], False
 
-        return cards
+        if not cards:
+            return cards, False
+
+        return cards, True
+
+    def _sanitize_json_text(self, text: str) -> str:
+        """清理 JSON 中未转义的控制字符"""
+        result = []
+        in_string = False
+        escape = False
+
+        for ch in text:
+            if escape:
+                result.append(ch)
+                escape = False
+                continue
+
+            if ch == "\\":
+                result.append(ch)
+                escape = True
+                continue
+
+            if ch == '"':
+                in_string = not in_string
+                result.append(ch)
+                continue
+
+            if in_string and ord(ch) < 32:
+                if ch == "\n":
+                    result.append("\\n")
+                elif ch == "\r":
+                    result.append("\\r")
+                elif ch == "\t":
+                    result.append("\\t")
+                else:
+                    result.append(f"\\u{ord(ch):04x}")
+                continue
+
+            result.append(ch)
+
+        return "".join(result)
 
     async def health_check(self) -> bool:
         """检查 API 连接状态"""

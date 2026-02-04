@@ -70,7 +70,7 @@
 | 📥 **CSV Export** | One-click export activity data to CSV for analysis |
 | ⏸️ **Pause Recording** | Pause when handling private content, resume when done |
 | 🎨 **Theme Switching** | IDE-style dark/light themes with auto-saved preferences |
-| ⚙️ **Configurable Settings** | Customize email times, sample frames, API timeout, and more |
+| ⚙️ **Configurable Settings** | Customize email times, idle pause threshold, API timeout, and more |
 | 📦 **EXE Packaging** | Build standalone executable, no Python required |
 
 ### 📋 Changelog
@@ -345,7 +345,9 @@ After building, the `dist/Dayflow/` folder can be copied and shared directly.
 2. Configure API settings:
    - **API URL**: OpenAI-compatible endpoint
    - **API Key**: Your API key
-   - **Model**: Vision-capable model name
+   - **Model**: Any model for OCR+LLM, vision-capable for VLM
+   - **Analysis Mode**: OCR+LLM (recommended) / VLM (images)
+   - **Idle Pause**: Auto pause when no input for the threshold
 3. Click **Test Connection** to verify
 4. Click **Save Config**
 
@@ -505,7 +507,7 @@ Dayflow takes user privacy seriously with multiple layers of protection:
 |---------|-------------|
 | 📍 **Local First** | All raw screen recordings are stored locally only, full videos are never uploaded |
 | 🗑️ **Auto Cleanup** | Video chunks are automatically deleted after AI analysis, saving disk space |
-| 🖼️ **Minimal Transfer** | Only key frames (max 8 per chunk) are extracted and sent for AI analysis |
+| 🖼️ **Minimal Transfer** | VLM sends key frames; OCR+LLM sends OCR text only |
 | ⏸️ **Pause Feature** | Pause recording anytime when handling sensitive content, resume when done |
 | 🔒 **Local Database** | Analysis results are stored in local SQLite, never uploaded to cloud |
 

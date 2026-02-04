@@ -76,6 +76,7 @@ class ScreenRecorder:
         self._canvas_scale: float = 1.0
         self._last_frame_sizes: Dict[int, Tuple[int, int]] = {}
         self._last_frames: Dict[int, np.ndarray] = {}
+        self._idle_paused = False
 
         # 确保输出目录存在
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -185,6 +186,21 @@ class ScreenRecorder:
 
         while not self._stop_event.is_set():
             current_time = time.time()
+
+            idle_seconds = self._window_tracker.get_idle_seconds()
+            if idle_seconds >= config.IDLE_THRESHOLD_SECONDS:
+                if not self._idle_paused:
+                    logger.info(f"检测到空闲 {idle_seconds:.0f}s，暂停录制")
+                    if self._current_writer and self._frame_count > 0:
+                        self._finalize_current_chunk()
+                    self._idle_paused = True
+                time.sleep(0.5)
+                continue
+
+            if self._idle_paused:
+                logger.info("检测到活动恢复，继续录制并开始新切片")
+                self._idle_paused = False
+                self._current_chunk_start = None
 
             # 控制帧率
             if current_time - last_frame_time < frame_interval:

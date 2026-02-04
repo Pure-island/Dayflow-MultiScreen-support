@@ -4,6 +4,8 @@ Dayflow Windows - 窗口信息追踪模块
 """
 
 import logging
+import ctypes
+from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Optional, Any, cast
 
@@ -190,6 +192,25 @@ class WindowTracker:
                 ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
             pass
+
+    def get_idle_seconds(self) -> float:
+        """获取系统空闲秒数（无键鼠输入）"""
+        if not self._available:
+            return 0.0
+
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+        try:
+            lii = LASTINPUTINFO()
+            lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+            if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)) == 0:
+                return 0.0
+            tick = ctypes.windll.kernel32.GetTickCount64()
+            idle_ms = tick - lii.dwTime
+            return max(idle_ms / 1000.0, 0.0)
+        except Exception:
+            return 0.0
 
     def get_friendly_app_name(self, window_info: Optional[WindowInfo]) -> str:
         """
