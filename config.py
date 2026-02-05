@@ -34,6 +34,7 @@ OCR_DEVICE = "gpu"  # gpu 或 cpu
 LLM_PARSE_RETRIES = 2
 IDLE_THRESHOLD_SECONDS = 300  # 无键鼠输入超过该秒数则暂停录制
 LLM_THINK = "off"  # off/on/low/medium/high
+LLM_CONTEXT_CARDS_LIMIT = 30
 
 # 存储清理配置
 AUTO_DELETE_ANALYZED_CHUNKS = True  # 分析完成后自动删除视频切片（节省磁盘空间）

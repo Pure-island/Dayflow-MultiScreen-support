@@ -606,6 +606,14 @@ class DayflowBackendProvider:
 
         obs_text += "\n必须覆盖完整时间范围 [0, duration]，不得留空洞。"
 
+        if context_cards:
+            obs_text += "\n\n前序活动卡片：\n"
+            for card in context_cards:
+                obs_text += f"- [{card.start_time}] {card.category}: {card.title}"
+                if card.summary:
+                    obs_text += f" | {card.summary}"
+                obs_text += "\n"
+
         if prompt:
             obs_text += f"\n{prompt}"
 

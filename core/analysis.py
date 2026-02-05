@@ -412,7 +412,12 @@ class AnalysisScheduler:
                 return
 
             # 获取上下文（最近的卡片）
-            context_cards = self.storage.get_recent_cards(limit=5)
+            context_limit = max(0, int(getattr(config, "LLM_CONTEXT_CARDS_LIMIT", 5)))
+            context_cards = (
+                self.storage.get_recent_cards(limit=context_limit)
+                if context_limit > 0
+                else []
+            )
 
             # 生成活动卡片
             duration_hint = None
