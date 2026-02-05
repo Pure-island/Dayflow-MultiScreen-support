@@ -452,12 +452,21 @@ class DayflowBackendProvider:
                 )
 
         max_parse_retries = max(0, int(getattr(config, "LLM_PARSE_RETRIES", 2)))
+        last_reason = ""
         for attempt in range(max_parse_retries + 1):
             try:
                 request_content = content
                 if attempt > 0:
-                    retry_tag = f"\n重试标记: {attempt}/{max_parse_retries} {int(time.time() * 1000)}"
-                    request_content = content + [{"type": "text", "text": retry_tag}]
+                    reason_text = f" reason={last_reason}" if last_reason else ""
+                    retry_tag = (
+                        f"重试标记: {attempt}/{max_parse_retries}"
+                        f" {int(time.time() * 1000)}{reason_text}"
+                    )
+                    request_content = (
+                        [{"type": "text", "text": retry_tag}]
+                        + content
+                        + [{"type": "text", "text": retry_tag}]
+                    )
 
                 messages = [
                     {"role": "system", "content": TRANSCRIBE_SYSTEM_PROMPT},
@@ -478,6 +487,10 @@ class DayflowBackendProvider:
                 if (
                     not parsed or len(observations) == 0
                 ) and attempt < max_parse_retries:
+                    if not parsed:
+                        last_reason = "parse_failed"
+                    elif len(observations) == 0:
+                        last_reason = "empty_result"
                     logger.warning(
                         "视频分析解析失败，正在重试 LLM 请求(%d/%d)",
                         attempt + 1,
@@ -493,6 +506,7 @@ class DayflowBackendProvider:
 
                 return observations
             except Exception as e:
+                last_reason = f"error={type(e).__name__}"
                 logger.error(f"视频分析失败: {e}")
                 return []
 
@@ -618,14 +632,17 @@ class DayflowBackendProvider:
             obs_text += f"\n{prompt}"
 
         max_parse_retries = max(0, int(getattr(config, "LLM_PARSE_RETRIES", 2)))
+        last_reason = ""
         for attempt in range(max_parse_retries + 1):
             try:
                 request_text = obs_text
                 if attempt > 0:
-                    request_text = (
-                        obs_text
-                        + f"\n重试标记: {attempt}/{max_parse_retries} {int(time.time() * 1000)}"
+                    reason_text = f" reason={last_reason}" if last_reason else ""
+                    retry_tag = (
+                        f"重试标记: {attempt}/{max_parse_retries}"
+                        f" {int(time.time() * 1000)}{reason_text}"
                     )
+                    request_text = f"{retry_tag}\n{obs_text}\n{retry_tag}"
 
                 messages = [
                     {"role": "system", "content": GENERATE_CARDS_SYSTEM_PROMPT},
@@ -643,6 +660,10 @@ class DayflowBackendProvider:
                 if parsed and len(cards) > 0:
                     return cards
                 if attempt < max_parse_retries:
+                    if not parsed:
+                        last_reason = "parse_failed"
+                    elif len(cards) == 0:
+                        last_reason = "empty_result"
                     logger.warning(
                         "卡片解析失败，正在重试 LLM 请求(%d/%d)",
                         attempt + 1,
@@ -651,6 +672,7 @@ class DayflowBackendProvider:
                     continue
                 return []
             except Exception as e:
+                last_reason = f"error={type(e).__name__}"
                 logger.error(f"卡片生成失败: {e}")
                 return []
 
@@ -831,7 +853,8 @@ class DayflowBackendProvider:
 
         for raw in candidates:
             try:
-                data = json.loads(self._sanitize_json_text(raw))
+                sanitized = self._sanitize_card_math(raw)
+                data = json.loads(self._sanitize_json_text(sanitized))
             except Exception:
                 data = None
 
@@ -839,6 +862,7 @@ class DayflowBackendProvider:
                 trimmed = self._trim_incomplete_json(raw)
                 if trimmed:
                     try:
+                        trimmed = self._sanitize_card_math(trimmed)
                         data = json.loads(self._sanitize_json_text(trimmed))
                     except Exception:
                         data = None
@@ -852,6 +876,18 @@ class DayflowBackendProvider:
                 return data
 
         return []
+
+    def _sanitize_card_math(self, text: str) -> str:
+        def repl(match: re.Match) -> str:
+            left = int(match.group(1))
+            right = int(match.group(2))
+            return f'"duration_seconds": {left - right}'
+
+        return re.sub(
+            r"\"duration_seconds\"\s*:\s*(\d+)\s*-\s*(\d+)",
+            repl,
+            text,
+        )
 
     def _trim_incomplete_json(self, text: str) -> Optional[str]:
         last_obj = text.rfind("}")
