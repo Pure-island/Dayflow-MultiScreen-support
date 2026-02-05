@@ -37,6 +37,7 @@ from PySide6.QtGui import (
 )
 
 from ui.themes import get_theme, get_theme_manager
+import config
 from database.storage import StorageManager
 from core.types import ActivityCard
 
@@ -1826,8 +1827,7 @@ class StatsPanel(QWidget):
                     if card.productivity_score > 0:
                         prev_total_score += card.productivity_score
                         prev_score_count += 1
-                    if card.duration_minutes >= 60:
-                        prev_deep_work += 1
+                prev_deep_work += self._count_deep_work_segments(cards)
 
             for i in range(days - 1, -1, -1):
                 date = today - timedelta(days=i)
@@ -1859,9 +1859,7 @@ class StatsPanel(QWidget):
                         total_score_range += card.productivity_score
                         score_count_range += 1
 
-                    # 深度工作（60分钟以上）
-                    if minutes >= 60:
-                        deep_work_count += 1
+                    # 深度工作统计放到每日汇总，避免重复计数
 
                     # 收集热力图数据（按小时）
                     if card.start_time and not self._is_unrecognized_card(card):
@@ -1910,6 +1908,9 @@ class StatsPanel(QWidget):
                 # 今日总时间
                 if i == 0:
                     total_today_minutes = sum(categories.values())
+
+                # 深度工作统计（每日）
+                deep_work_count += self._count_deep_work_segments(cards)
 
             # 更新顶部指标卡片
             total_hours = total_minutes_range / 60
@@ -1994,6 +1995,45 @@ class StatsPanel(QWidget):
         title = getattr(card, "title", "") or ""
         category = getattr(card, "category", "") or ""
         return "未识别" in title or "未识别" in category
+
+    def _count_deep_work_segments(self, cards) -> int:
+        segments = []
+        threshold_seconds = 45 * 60
+        gap_tolerance = max(
+            0, int(getattr(config, "DEEP_WORK_GAP_TOLERANCE_SECONDS", 0))
+        )
+        filtered = [
+            c
+            for c in cards
+            if not self._is_unrecognized_card(c)
+            and c.productivity_score >= 80
+            and c.start_time
+            and c.end_time
+        ]
+        if not filtered:
+            return 0
+
+        filtered.sort(key=lambda c: c.start_time)
+        current_start = filtered[0].start_time
+        current_end = filtered[0].end_time
+
+        for card in filtered[1:]:
+            if card.start_time <= current_end + timedelta(seconds=gap_tolerance):
+                if card.end_time > current_end:
+                    current_end = card.end_time
+            else:
+                segments.append((current_start, current_end))
+                current_start = card.start_time
+                current_end = card.end_time
+
+        segments.append((current_start, current_end))
+
+        count = 0
+        for start, end in segments:
+            duration_seconds = (end - start).total_seconds()
+            if duration_seconds >= threshold_seconds:
+                count += int(duration_seconds // threshold_seconds)
+        return count
 
     def apply_theme(self):
         """应用主题"""
