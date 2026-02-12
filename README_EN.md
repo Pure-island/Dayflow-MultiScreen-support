@@ -347,7 +347,7 @@ After building, the `dist/Dayflow/` folder can be copied and shared directly.
    - **API Key**: Your API key
    - **Model**: Any model for OCR+LLM, vision-capable for VLM
    - **Analysis Mode**: OCR+LLM (recommended) / VLM (images)
-   - **Thinking (Ollama)**: off/on/low/medium/high
+   - **Thinking**: off/on/low/medium/high (support depends on provider)
    - **Idle Pause**: Auto pause when no input for the threshold
    - **Retries**: Auto retry on parse failure or empty result
 3. Click **Test Connection** to verify

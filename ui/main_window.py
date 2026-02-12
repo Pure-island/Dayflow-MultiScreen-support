@@ -586,7 +586,7 @@ class SettingsPanel(QWidget):
         self.analysis_mode_combo.setMinimumHeight(40)
         api_layout.addWidget(self.analysis_mode_combo)
 
-        think_label = QLabel("Thinking 模式（Ollama）")
+        think_label = QLabel("Thinking 模式")
         think_label.setObjectName("cardDesc")
         self._descs.append(think_label)
         api_layout.addWidget(think_label)

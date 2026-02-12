@@ -135,6 +135,29 @@ class DayflowBackendProvider:
             await self._client.aclose()
             self._client = None
 
+    def _is_siliconflow_api(self) -> bool:
+        return "siliconflow.cn" in self.api_base_url.lower()
+
+    def _apply_thinking_mode(self, request_body: Dict) -> None:
+        think_value = (config.LLM_THINK or "off").lower()
+        if think_value == "off":
+            return
+
+        if self._is_siliconflow_api():
+            request_body["enable_thinking"] = True
+            budget_map = {
+                "on": 4096,
+                "low": 1024,
+                "medium": 4096,
+                "high": 8192,
+            }
+            budget = budget_map.get(think_value)
+            if budget is not None:
+                request_body["thinking_budget"] = budget
+            return
+
+        request_body["think"] = True if think_value == "on" else think_value
+
     def _extract_frames_from_video(
         self, video_path: str, max_frames: int = 8
     ) -> Tuple[List[Tuple[int, "cv2.Mat"]], int]:
@@ -215,9 +238,7 @@ class DayflowBackendProvider:
             "max_tokens": 4096,
         }
 
-        think_value = (config.LLM_THINK or "off").lower()
-        if think_value != "off":
-            request_body["think"] = True if think_value == "on" else think_value
+        self._apply_thinking_mode(request_body)
 
         max_retries = max(0, int(getattr(config, "LLM_MAX_RETRIES", 2)))
         retry_delay = float(getattr(config, "LLM_RETRY_DELAY_SECONDS", 1.0))
@@ -252,7 +273,11 @@ class DayflowBackendProvider:
                     )
 
                 if not content and isinstance(message, dict):
-                    reasoning = message.get("reasoning") or message.get("thinking")
+                    reasoning = (
+                        message.get("reasoning")
+                        or message.get("thinking")
+                        or message.get("reasoning_content")
+                    )
                     if reasoning:
                         logger.info("API 返回空 content，使用 reasoning 字段")
                         content = reasoning
